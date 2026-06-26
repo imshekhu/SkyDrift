@@ -436,7 +436,8 @@ export function createVehiclesSystem(): GameSystem {
       }
     }
     pos.needsUpdate = true
-    geo.computeVertexNormals()
+    // flatShading:true → shader derives face normals from position derivatives (dFdx/dFdy).
+    // The normal attribute is not used; calling computeVertexNormals() every frame is wasteful.
     // Tilt the rigid trim frame to follow the cloth's nose-to-tail slope so the
     // gold border rides the ripple instead of hovering flat above it.
     if (carpetTrim) carpetTrim.rotation.x = (backY - frontY) * 0.18
@@ -462,7 +463,7 @@ export function createVehiclesSystem(): GameSystem {
       arr[i * 3 + 2] = bz
     }
     pos.needsUpdate = true
-    geo.computeVertexNormals()
+    // flatShading:true → face normals are derived in-shader; no CPU recompute needed.
   }
 
   // ----- vehicle switching -------------------------------------------------

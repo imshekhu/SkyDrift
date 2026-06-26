@@ -136,12 +136,16 @@ export function buildPlanet(radius: number, rand: () => number): Planet {
   }
 
   // --- public surfacePoint: world point on the surface (+ optional altitude) ----
-  // Reuses a module temp; callers must consume/copy before the next call.
+  // Zero-allocation: writes into `out` when provided, otherwise into _spOut.
+  // Callers that don't pass `out` must consume the result before the next call.
   const _spDir = new THREE.Vector3()
-  const surfacePoint = (dir: THREE.Vector3, extra?: number): THREE.Vector3 => {
+  const _spOut = new THREE.Vector3()
+  const surfacePoint = (dir: THREE.Vector3, extra?: number, out?: THREE.Vector3): THREE.Vector3 => {
     _spDir.copy(dir).normalize()
     const r = radius + heightAt(_spDir) + (extra ?? 0)
-    return new THREE.Vector3(_spDir.x * r, _spDir.y * r, _spDir.z * r)
+    const target = out ?? _spOut
+    target.set(_spDir.x * r, _spDir.y * r, _spDir.z * r)
+    return target
   }
 
   // ── Build the displaced, vertex-colored land mesh ──────────────────────────

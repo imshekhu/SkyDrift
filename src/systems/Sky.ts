@@ -146,6 +146,8 @@ const _sunCol = new THREE.Color()
 const _hemiSky = new THREE.Color()
 const _hemiGround = new THREE.Color()
 const _ambCol = new THREE.Color()
+// Cache the last clear-color hex so setClearColor is only called when it actually changes.
+let _lastSkyFogHex = -1
 // Reusable blended scalar out-struct (filled by sample()).
 const _out = {
   preset: 'day',
@@ -454,7 +456,13 @@ export function createSkySystem(): GameSystem {
         fog.color.lerp(_fogCol, kc)
         fog.near += (out.fogNear - fog.near) * kc
         fog.far += (out.fogFar - fog.far) * kc
-        ctx.renderer.setClearColor(fog.color, 1)
+        // Only call setClearColor when the fog colour has meaningfully changed (saves a
+        // GPU state-change per frame while the sky is stable).
+        const fogHex = fog.color.getHex()
+        if (fogHex !== _lastSkyFogHex) {
+          _lastSkyFogHex = fogHex
+          ctx.renderer.setClearColor(fog.color, 1)
+        }
       }
 
       // --- drive the EXISTING lights -------------------------------------

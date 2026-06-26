@@ -755,8 +755,8 @@ export function createCelestialSystem(): GameSystem {
           const ph = lanternWobPhase[i]
           const wobX = Math.sin(lanternSpin[i] + ph) * 1.6
           const wobZ = Math.cos(lanternSpin[i] * 0.8 + ph) * 1.3
-          // surface point lifted by current rise height
-          _v0.copy(ctx.planet.surfacePoint(dir, 4 + rise))
+          // surface point lifted by current rise height (write directly into _v0 — no alloc)
+          ctx.planet.surfacePoint(dir, 4 + rise, _v0)
           // sway laterally on the tangent plane
           makeTangents(dir, _v1, _v2)
           _v0.addScaledVector(_v1, wobX).addScaledVector(_v2, wobZ)

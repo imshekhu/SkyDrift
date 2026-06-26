@@ -61,6 +61,8 @@ const RAINBOW_SECONDS = 12
 // ---- module-scoped temporaries (no per-frame allocation) -------------------
 const _fogCol = new THREE.Color()
 const _darkFog = new THREE.Color()
+// Cache the last fog hex so setClearColor is skipped when the colour hasn't changed.
+let _lastWeatherFogHex = -1
 
 interface Weather {
   raining: boolean
@@ -330,7 +332,11 @@ export function createWeatherSystem(): GameSystem {
           // ease toward the darkened colour; Sky will re-assert next frame and we
           // re-darken — net effect is a steady ~15% dim that tracks the cycle.
           f.color.lerp(_darkFog, damp(3.0, dt))
-          ctx.renderer.setClearColor(f.color, 1)
+          const fh = f.color.getHex()
+          if (fh !== _lastWeatherFogHex) {
+            _lastWeatherFogHex = fh
+            ctx.renderer.setClearColor(f.color, 1)
+          }
         }
       }
 

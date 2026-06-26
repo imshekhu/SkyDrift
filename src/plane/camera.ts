@@ -2,6 +2,8 @@ import * as THREE from 'three'
 import { TUNING, damp } from './flight'
 
 // Module-scoped temps — zero per-frame allocation.
+// Track last projected FOV so we only call updateProjectionMatrix when it changes.
+let _lastFov = -999
 const _off = new THREE.Vector3()
 const _desired = new THREE.Vector3()
 const _fwd = new THREE.Vector3()
@@ -38,5 +40,10 @@ export function updateChaseCamera(
 
   const fov = boosting ? TUNING.CAM_FOV_BOOST : TUNING.CAM_FOV_BASE
   cam.fov += (fov - cam.fov) * damp(5, dt)
-  cam.updateProjectionMatrix()
+  // Only rebuild the projection matrix when the FOV meaningfully changed OR
+  // when boosting (Boost.ts wraps this call to inject fovBias for the shake).
+  if (boosting || Math.abs(cam.fov - _lastFov) > 0.01) {
+    _lastFov = cam.fov
+    cam.updateProjectionMatrix()
+  }
 }

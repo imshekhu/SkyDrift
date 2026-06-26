@@ -154,7 +154,7 @@ export function createLightingSystem(): GameSystem {
 
       // Surface point under the (drifted) plane, lifted a hair to avoid z-fight.
       _tmp.copy(_up).addScaledVector(_drift, driftDist * 0.012) // tiny angular nudge
-      _surf.copy(ctx.planet.surfacePoint(_tmp, 0.06))
+      ctx.planet.surfacePoint(_tmp, 0.06, _surf) // write directly into _surf — no alloc
       blob.position.copy(_surf)
 
       // Lay the quad flat on the sphere: PlaneGeometry faces +Z, _FLAT tilts

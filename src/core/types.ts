@@ -8,8 +8,9 @@ export interface Planet {
   mesh: THREE.Mesh
   /** terrain height above base radius at a unit surface direction (0 for a smooth sphere) */
   heightAt(dir: THREE.Vector3): number
-  /** world position on the surface for a unit direction, plus optional extra altitude */
-  surfacePoint(dir: THREE.Vector3, extra?: number): THREE.Vector3
+  /** world position on the surface for a unit direction, plus optional extra altitude.
+   *  Pass `out` to write into an existing Vector3 (zero-allocation path). */
+  surfacePoint(dir: THREE.Vector3, extra?: number, out?: THREE.Vector3): THREE.Vector3
 }
 
 export interface Player {

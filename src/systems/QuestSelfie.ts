@@ -1005,7 +1005,8 @@ export function createSelfieQuestSystem(): GameSystem {
       _proj.y < 0.85
 
     // Don't crowd the screen once you're basically there / it's on screen.
-    if (onScreen || inRange) {
+    // Keep chevron until the proximity ring takes over (ring shows at enterR*RING_LEAD).
+    if (inRange || dist <= t.selfieRadius * RING_LEAD) {
       showChevron(false)
       return
     }

@@ -684,7 +684,7 @@ export function createLandmarksSystem(): GameSystem {
           id: def.id,
           name: def.name,
           label: def.label,
-          position: anchor,
+          position: anchor.clone(),
           dir: chosen.clone(),
           selfieRadius: def.radius,
         })

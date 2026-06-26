@@ -404,10 +404,10 @@ export function createScenerySystem(): GameSystem {
         const mesh = makeMesh(base, 'scenery.bushes', BUSH_COUNT)
         // half clustered in forests, half free-scattered on grass
         const half = (BUSH_COUNT / 2) | 0
-        const a = populate(mesh, half, forests, onGrass, SCALE.bush, 0.18, 0, null)
+        const a = populate(mesh, half, forests, onGrass, SCALE.bush, 0.07, 0, null)
         mesh.count = BUSH_COUNT // allow the scatter pass to keep filling
         const scatter = makeClusters(40, 0.08, 0.18, onGrass)
-        const b = scatterFill(mesh, a, BUSH_COUNT, scatter, onGrass, landT, jitterDir, composeAt, SCALE.bush, 0.18, rand)
+        const b = scatterFill(mesh, a, BUSH_COUNT, scatter, onGrass, landT, jitterDir, composeAt, SCALE.bush, 0.07, rand)
         mesh.count = b
         mesh.instanceMatrix.needsUpdate = true
         finalizeMesh(mesh, radius)
@@ -489,10 +489,10 @@ export function createScenerySystem(): GameSystem {
         geometries.push(base)
         const mesh = makeMesh(base, 'scenery.rocks', ROCK_COUNT)
         const accRocky = (t: number) => t >= SHORE_T && t <= SNOW_T // wide: boulders + alpine
-        const a = populate(mesh, (ROCK_COUNT * 0.7) | 0, boulders, accRocky, SCALE.rock, 0.35, 0, null)
+        const a = populate(mesh, (ROCK_COUNT * 0.7) | 0, boulders, accRocky, SCALE.rock, 0.15, 0, null)
         mesh.count = ROCK_COUNT
         const highScatter = makeClusters(24, 0.05, 0.13, onRocky)
-        const b = scatterFill(mesh, a, ROCK_COUNT, highScatter, onRocky, landT, jitterDir, composeAt, SCALE.rock, 0.35, rand)
+        const b = scatterFill(mesh, a, ROCK_COUNT, highScatter, onRocky, landT, jitterDir, composeAt, SCALE.rock, 0.15, rand)
         mesh.count = b
         mesh.instanceMatrix.needsUpdate = true
         finalizeMesh(mesh, radius)

@@ -15,6 +15,8 @@ export const TUNING = {
   SPEED_MIN: 26 * S, // throttle 0 → idle glide
   SPEED_MAX: 86 * S, // throttle 1 → full
   THROTTLE_RATE: 0.6, // throttle-lever units per second under full W/S
+  DEFAULT_THROTTLE: 0.36, // spring-loaded rest position — speed returns here on release
+  THROTTLE_RETURN: 2.0, // how fast the throttle springs back to default once W/S is let go
   BOOST_THROTTLE: 0.72, // throttle above this reads as "boosting" (camera FOV + boost FX)
   SPEED_LERP: 3,
   // Physical ground speed = this × the displayed speed. < 1 slows the plane down
@@ -37,8 +39,11 @@ export const TUNING = {
   // Altitude is TERRAIN-RELATIVE: low-passed terrain + a base clearance + the
   // climb-spring offset. Clearance runs CRUISE → CLIMB (a smooth 3× range).
   // (10/30 are authored radius-100 units; × WORLD_SCALE → terrain+64 → terrain+192 here.)
-  CRUISE_CLEARANCE: 10 * S, // baseline cruise: 10 units above the displaced terrain
-  CLIMB_CLEARANCE: 30 * S, // Arrow-Up ceiling: 30 units above terrain (3× expansion)
+  CRUISE_CLEARANCE: 10 * S, // baseline cruise altitude (= 64 ALT on the current scale)
+  CLIMB_CLEARANCE: 100, // Arrow-Up ceiling: hold Up to rise to 100 ALT
+  CLIMB_RISE_K: 1.2, // how briskly Arrow-Up climbs toward the ceiling
+  CLIMB_DESCEND_K: 1.5, // how briskly S / Arrow-Down dumps the climbed altitude
+  CLIMB_GLIDE_TIME: 10, // seconds to smoothly glide back to cruise after releasing Up
   FLOOR_CLEARANCE: 3 * S, // HARD floor = local terrain height + this (no clipping mountains)
   CEILING_ALTITUDE: 46 * S, // HARD ceiling above base radius (can't escape to space)
   GRAVITY: 9, // (legacy/unused — altitude uses the ALT_RETURN spring)
@@ -92,8 +97,10 @@ export class Flight {
   private sc = 0 // smoothed climb input (Arrow Up)
   // terrain-relative altitude state:
   private smoothTerrain = NaN // low-passed terrain height we hug (snaps to terrain on frame 0)
-  private climbOffset = 0 // extra clearance from the climb spring (0 → CLIMB−CRUISE)
-  private climbVel = 0 // velocity of the majestic climb-offset spring
+  private climbOffset = 0 // extra clearance above cruise (0 → climbMax)
+  private gliding = false // true while easing back down after an Arrow-Up release
+  private glideFrom = 0 // climbOffset captured at the instant Up is released
+  private glideT = 0 // 0..1 progress of the ~10s smoothstep glide-down
 
   constructor(obj: THREE.Object3D) {
     this.obj = obj
@@ -118,12 +125,17 @@ export class Flight {
     // Smooth the bank + climb axes (frame-rate-independent).
     this.sr += (input.roll - this.sr) * damp(TUNING.INPUT_SMOOTH, dt)
     this.sc += (input.climb - this.sc) * damp(TUNING.INPUT_SMOOTH, dt)
-    // Throttle lever: W/S nudge it and it HOLDS when released (a real throttle).
-    this.throttle = THREE.MathUtils.clamp(
-      this.throttle + input.throttle * TUNING.THROTTLE_RATE * dt,
-      0,
-      1
-    )
+    // Throttle: W/S actively drive it while held (it climbs/falls), and it springs
+    // BACK to the default cruise throttle the moment the key is released.
+    if (input.throttle !== 0) {
+      this.throttle = THREE.MathUtils.clamp(
+        this.throttle + input.throttle * TUNING.THROTTLE_RATE * dt,
+        0,
+        1
+      )
+    } else {
+      this.throttle += (TUNING.DEFAULT_THROTTLE - this.throttle) * damp(TUNING.THROTTLE_RETURN, dt)
+    }
     // High throttle reads as "boosting" → camera FOV widen + the Boost FX/trail.
     this.boosting = this.throttle > TUNING.BOOST_THROTTLE
     input.boost = this.boosting // the Boost system reads this for its meter/FX
@@ -137,7 +149,7 @@ export class Flight {
     // Motion is scaled (MOVE_SPEED_SCALE) but `speed` — what the HUD shows — is not.
     this.obj.position.addScaledVector(_fwd, this.speed * TUNING.MOVE_SPEED_SCALE * dt)
 
-    this.constrainAltitude(dt)
+    this.constrainAltitude(dt, input)
   }
 
   // Banking turns, singularity-free: build a SMALL local-frame Euler delta and
@@ -203,7 +215,7 @@ export class Flight {
   //                   toward CRUISE_ALTITUDE. With d = altitude − cruise,
   //                       d(t) = (d₀ + (v₀ + ω·d₀)·t)·e^(−ω·t)
   //                   which is unconditionally stable and never overshoots at any dt.
-  private constrainAltitude(dt: number) {
+  private constrainAltitude(dt: number, input: InputState) {
     _radialUp.copy(this.obj.position).normalize() // direction AFTER the tangential advance
     const terrain = this.terrainHeightAt ? this.terrainHeightAt(_radialUp) : 0
 
@@ -214,25 +226,40 @@ export class Flight {
     if (Number.isNaN(this.smoothTerrain)) this.smoothTerrain = terrain // snap on frame 0
     this.smoothTerrain += (terrain - this.smoothTerrain) * damp(TUNING.TERRAIN_TRACK_K, dt)
 
-    // (2) CLIMB OFFSET — a majestic, EXACT critically-damped (ζ=1) spring that
-    // expands the clearance from 0 (cruise) up to CLIMB−CRUISE (full climb) while
-    // Arrow Up is held, then glides asymptotically back to 0 on release.
-    //   d(t) = (d₀ + (v₀ + ω·d₀)·t)·e^(−ω·t)  → never overshoots, zero bounce.
-    const climbTarget = this.sc * (TUNING.CLIMB_CLEARANCE - TUNING.CRUISE_CLEARANCE)
-    const w = TUNING.ALT_OMEGA
-    const e = Math.exp(-w * dt)
-    const d0 = this.climbOffset - climbTarget
-    const B = this.climbVel + w * d0
-    this.climbOffset = climbTarget + (d0 + B * dt) * e
-    this.climbVel = (this.climbVel - w * B * dt) * e
-    if (Math.abs(d0) < 1e-3 && Math.abs(this.climbVel) < 1e-3) {
-      this.climbOffset = climbTarget
-      this.climbVel = 0
+    // (2) CLIMB OFFSET — Arrow-Up lifts the plane toward the ceiling; S or Arrow-Down
+    // actively DESCEND back to cruise (dumping the climbed altitude); and a plain
+    // release HOLDS, then glides gently back over CLIMB_GLIDE_TIME seconds with a
+    // smoothstep ease (lingers high, then settles soft).
+    const prevOffset = this.climbOffset
+    const climbMax = TUNING.CLIMB_CLEARANCE - TUNING.CRUISE_CLEARANCE
+    const climbing = input.climb > 0.5 // Arrow Up
+    const descending = input.climb < -0.5 || input.throttle < -0.5 // Arrow Down or S
+    if (climbing) {
+      this.gliding = false
+      this.climbOffset += (climbMax - this.climbOffset) * damp(TUNING.CLIMB_RISE_K, dt)
+    } else if (descending && this.climbOffset > 1e-3) {
+      // brisk, deliberate descent back to cruise — never below it (only the gain).
+      this.gliding = false
+      this.climbOffset += (0 - this.climbOffset) * damp(TUNING.CLIMB_DESCEND_K, dt)
+      if (this.climbOffset < 1e-3) this.climbOffset = 0
+    } else if (this.gliding || this.climbOffset > 1e-3) {
+      // released → slow ~10s smoothstep glide back to cruise (slow-in / slow-out).
+      if (!this.gliding) {
+        this.gliding = true
+        this.glideFrom = this.climbOffset
+        this.glideT = 0
+      }
+      this.glideT = Math.min(1, this.glideT + dt / TUNING.CLIMB_GLIDE_TIME)
+      this.climbOffset = this.glideFrom * (1 - ease(this.glideT))
+      if (this.glideT >= 1) {
+        this.climbOffset = 0
+        this.gliding = false
+      }
     }
 
     // altitude = smoothed terrain + base clearance (10) + majestic climb offset (→ 30)
     this.altitude = this.smoothTerrain + TUNING.CRUISE_CLEARANCE + this.climbOffset
-    this.radialVel = this.climbVel // expose vertical rate (HUD climb/dive arrow)
+    this.radialVel = (this.climbOffset - prevOffset) / Math.max(dt, 1e-6) // vertical rate (HUD arrow)
     this.obj.position.copy(_radialUp).multiplyScalar(PLANET_RADIUS + this.altitude)
 
     // --- HARD floor against the ACTUAL terrain (never clip a sudden peak) + ceiling ---

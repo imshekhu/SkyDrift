@@ -2,14 +2,15 @@
 // shape, so the flight model in plane/flight.ts is input-source-agnostic.
 //
 // CONTROL SCHEMA (action loop):
-//   W / S        throttle up / down   (accelerate / decelerate — a real throttle lever)
+//   W / S        throttle up / down   (accelerate / decelerate; S also descends)
 //   A / D        bank left / right    (banking CARVES the turn)
-//   Arrow Up     climb                (damped-spring climb; release → settle to cruise)
+//   Arrow Up     climb                (rise to the ceiling; release → glide back)
+//   Arrow Down   descend              (S / Arrow Down dump the climbed altitude)
 //   Spacebar     fire weapon          (held → auto-fire at the weapon's cadence)
 export interface InputState {
   throttle: number // -1..1 — W = +1 (accelerate), S = -1 (decelerate); a RATE on the lever
   roll: number // -1..1 — A = -1 (bank left), D = +1 (bank right)
-  climb: number // 0..1  — Arrow Up held → the damped-spring climb
+  climb: number // -1..1 — Arrow Up → climb, Arrow Down → descend
   firing: boolean // Spacebar held → fire the weapon
   boost: boolean // derived by Flight from high throttle; the Boost system reads it for FX
 }
@@ -39,7 +40,8 @@ export function pollKeyboard() {
   if (keys['KeyS']) throttle -= 1 // decelerate
   if (keys['KeyA'] || keys['ArrowLeft']) roll -= 1 // bank left
   if (keys['KeyD'] || keys['ArrowRight']) roll += 1 // bank right
-  if (keys['ArrowUp']) climb = 1 // damped-spring climb
+  if (keys['ArrowUp']) climb = 1 // climb toward the ceiling
+  if (keys['ArrowDown']) climb = -1 // descend / dump the climbed altitude
   input.throttle = throttle
   input.roll = roll
   input.climb = climb

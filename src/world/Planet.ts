@@ -1,8 +1,10 @@
 import * as THREE from 'three'
 import { createNoise3D } from 'simplex-noise'
 import alea from 'alea'
-import type { Planet, GameSystem, GameContext } from '../core/types'
+import type { Planet, GameSystem, GameContext, RegionDef } from '../core/types'
 import { PAL } from '../art/palette'
+import { AUTHORED_RADIUS } from './WorldConfig'
+import { regionInfluenceAt } from './regions'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SkyDrift — Planet
@@ -27,7 +29,7 @@ import { PAL } from '../art/palette'
 // ─────────────────────────────────────────────────────────────────────────────
 
 // --- terrain shaping (all relative to planet radius) -------------------------
-const GEO_DETAIL = 6 // icosa subdivisions: ~245k tris at detail 6 — heavy but smooth
+const GEO_DETAIL = 7 // icosa subdivisions: ~980k tris — base tier (P3 adds high-detail region chunks)
 const NOISE_FREQ = 1.5 // base spatial frequency of the FBM field
 const FBM_OCTAVES = 4
 const FBM_LACUNARITY = 2.0
@@ -46,10 +48,10 @@ const BIOME = {
   waterDeep: sc(0x4f86c6),
   waterShallow: sc(0x7fb4e0),
   shoal: sc(0xb6dcec), // pale turquoise just under the shoreline
-  sandWet: sc(0xe8d6a4), // darker damp sand right at the waterline
-  sand: sc(0xf0e2b8),
+  sandWet: sc(0xd9b878), // damp sand — deepened so deserts/beaches read warm, not pale
+  sand: sc(0xe6cb86), // dry sand — richer/warmer than the old near-cream so it pops vs the sky
   grass: PAL.planet.clone(), // cohesion: same green as PAL.planet
-  meadow: sc(0xbcd98f), // brighter grass for gentle lowlands
+  meadow: sc(0xa6cf68), // richer lowland grass (deepened for biome contrast)
   forest: PAL.tree.clone(),
   rock: sc(0x9a8f86),
   rockDark: sc(0x7d756e), // shaded rock for craggy high slopes
@@ -65,7 +67,7 @@ const GRASS_TOP = 0.66
 const FOREST_TOP = 0.8
 const ROCK_TOP = 0.92
 
-export function buildPlanet(radius: number, rand: () => number): Planet {
+export function buildPlanet(radius: number, rand: () => number, regions?: RegionDef[]): Planet {
   // Deterministic noise seeded from the game's RNG so the same seed → same world.
   const seed = Math.floor(rand() * 0xffffffff) >>> 0
   const noise3D = createNoise3D(alea(seed))
@@ -103,7 +105,12 @@ export function buildPlanet(radius: number, rand: () => number): Planet {
     const n = fbm(wx, wy, wz) // [-1,1]
     // Ridge-ish continental shaping: push mid values toward land, keep valleys low.
     const shaped = Math.sign(n) * Math.pow(Math.abs(n), 0.85)
-    return shaped * RELIEF * radius
+    let e = shaped * RELIEF * radius
+    // Region terrain identity: raise/lower mean land height per biome region
+    // (desert flat, alpine/volcano tall, ocean sunk below sea level), feathered
+    // at borders. Folded into elevationAt so heightAt()/placement match the mesh.
+    if (regions) e += regionInfluenceAt(regions, x, y, z).bias * RELIEF * radius
+    return e
   }
 
   // Inland water mask in [0,1]: 1 where a river/lake should carve a shallow basin.
@@ -197,6 +204,16 @@ export function buildPlanet(radius: number, rand: () => number): Planet {
     // Pick + blend biome by band for soft pastel transitions.
     biomeColor(e, lat, river, col, tmp)
 
+    // Region tint: push the surface colour toward this region's hue (feathered
+    // at borders) so each biome region reads as a distinct PLACE from the air.
+    if (regions) {
+      const inf = regionInfluenceAt(regions, dir.x, dir.y, dir.z)
+      const a = inf.amount
+      col.r = col.r * (1 - a) + inf.tintR * a
+      col.g = col.g * (1 - a) + inf.tintG * a
+      col.b = col.b * (1 - a) + inf.tintB * a
+    }
+
     // Subtle per-vertex value jitter for a hand-painted feel (deterministic).
     const j = 1 + (hash01(i) - 0.5) * 0.06
     colors[i * 3] = Math.min(1, col.r * j)
@@ -275,6 +292,8 @@ export function buildPlanet(radius: number, rand: () => number): Planet {
 
   const planet: Planet = {
     radius,
+    scale: radius / AUTHORED_RADIUS, // multiply authored (radius-100) lengths by this
+    relief: RELIEF * radius, // max terrain displacement above base radius (world units)
     mesh: group as unknown as THREE.Mesh,
     heightAt,
     surfacePoint,

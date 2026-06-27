@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { GameContext, GameSystem } from '../core/types'
 import { PAL } from '../art/palette'
 import { damp } from '../plane/flight'
+import { WORLD_SCALE } from '../world/WorldConfig'
 
 /**
  * NpcLife — a small LIVING WORLD layered over the planet. Everything here is
@@ -56,28 +57,28 @@ const WAKE_POOL = BOAT_COUNT * 7 // V-wake foam quads trailing boats
 const TRAIL_POOL = NPC_PLANE_COUNT * 9 // vapour puffs behind NPC planes
 
 // ── Flight bands / motion tuning (world units; planet radius is 100). ─────────
-const BIRD_ALT_MIN = 22
-const BIRD_ALT_MAX = 40
+const BIRD_ALT_MIN = 22 * WORLD_SCALE
+const BIRD_ALT_MAX = 40 * WORLD_SCALE
 const BIRD_ANGULAR_SPEED = 0.14 // rad/s of the flock around its great circle
-const BIRD_SPREAD = 7 // local jitter radius of birds around the centroid
-const BIRD_SEPARATION = 2.6 // min comfortable gap between flockmates
+const BIRD_SPREAD = 7 * WORLD_SCALE // local jitter radius of birds around the centroid
+const BIRD_SEPARATION = 2.6 * WORLD_SCALE // min comfortable gap between flockmates
 const BIRD_FLAP_HZ = 6.5
 
-const FISH_SCHOOL_SPREAD = 3.0 // how far schoolmates mill from the tile anchor
-const FISH_ALT = 0.4 // idle depth just beneath the water shell
-const FISH_HOP_HEIGHT = 6.5 // peak height of an arc above the surface
+const FISH_SCHOOL_SPREAD = 3.0 * WORLD_SCALE // how far schoolmates mill from the tile anchor
+const FISH_ALT = 0.4 * WORLD_SCALE // idle depth just beneath the water shell
+const FISH_HOP_HEIGHT = 6.5 * WORLD_SCALE // peak height of an arc above the surface
 const FISH_HOP_TIME = 1.15 // seconds airborne per hop
 const FISH_IDLE_MIN = 2.2 // min seconds between hops
-const FISH_IDLE_MAX = 6.5
+const FISH_IDLE_MAX = 6.5 // seconds between hops — a DURATION, not a length (unscaled)
 
-const PLANE_ALT = 30
+const PLANE_ALT = 30 * WORLD_SCALE
 const PLANE_ANGULAR_SPEED = 0.18 // rad/s along the NPC's great circle
-const PLANE_HIT_RADIUS = 4.5 // paintball collision radius
+const PLANE_HIT_RADIUS = 4.5 * WORLD_SCALE // paintball collision radius
 const PLANE_RESPAWN_DELAY = 2.4 // seconds a "puffed" plane stays hidden
 const PLANE_TRAIL_SPACING = 0.18 // seconds between vapour puffs
 const PLANE_TRAIL_LIFE = 1.5 // seconds a puff lives
 
-const BOAT_ALT = 0.2 // sit on the water shell
+const BOAT_ALT = 0.2 * WORLD_SCALE // sit on the water shell
 const BOAT_ANGULAR_SPEED = 0.012 // very slow drift along its sea great-circle
 const BOAT_BOB_HZ = 0.6
 const BOAT_WAKE_SPACING = 0.5 // seconds between wake foam drops
@@ -1152,7 +1153,7 @@ function buildBirdGeometry(): THREE.BufferGeometry {
   tail.translate(0, 0, -0.8)
   paint(tail, BIRD_BODY)
 
-  return mergeOrFallback([body, wingL, wingR, tail], 0.6)
+  return mergeOrFallback([body, wingL, wingR, tail], 0.6 * WORLD_SCALE)
 }
 
 /** A pastel fish: teardrop body (cone) + a tail fin. Nose along +Z. */
@@ -1168,7 +1169,7 @@ function buildFishGeometry(): THREE.BufferGeometry {
   tail.translate(0, 0, -0.95)
   paint(tail, FISH_BODY)
 
-  return mergeOrFallback([body, tail], 0.5)
+  return mergeOrFallback([body, tail], 0.5 * WORLD_SCALE)
 }
 
 /** A wandering NPC craft: mint fuselage, cream wings + tail. Nose +Z. */
@@ -1193,7 +1194,7 @@ function buildNpcPlaneGeometry(): THREE.BufferGeometry {
   fin.translate(0, 0.35, -1.0)
   paint(fin, PLANE_WING)
 
-  return mergeOrFallback([fuse, nose, wing, tailH, fin], 1.0)
+  return mergeOrFallback([fuse, nose, wing, tailH, fin], 1.0 * WORLD_SCALE)
 }
 
 /** A little boat: woody hull (tapered box-ish) + a cream triangular sail. */
@@ -1220,7 +1221,7 @@ function buildBoatGeometry(): THREE.BufferGeometry {
   sail.translate(0, 1.0, 0.0)
   paint(sail, BOAT_SAIL)
 
-  return mergeOrFallback([hull, bow, mast, sail], 1.0)
+  return mergeOrFallback([hull, bow, mast, sail], 1.0 * WORLD_SCALE)
 }
 
 /** A capybara: a chunky rounded body + blocky head + tiny ears. */
@@ -1247,7 +1248,7 @@ function buildCapyGeometry(): THREE.BufferGeometry {
   earR.translate(0.25, 1.05, 0.95)
   paint(earR, CAPY_FUR)
 
-  return mergeOrFallback([body, head, snout, earL, earR], 1.2)
+  return mergeOrFallback([body, head, snout, earL, earR], 1.2 * WORLD_SCALE)
 }
 
 // ── geometry utilities ────────────────────────────────────────────────────

@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { GameContext, GameSystem } from '../core/types'
 import { PAL } from '../art/palette'
 import { damp } from '../plane/flight'
+import { WORLD_SCALE } from '../world/WorldConfig'
 
 /**
  * QuestSelfie — the LANDMARK SELFIE quest.
@@ -63,7 +64,7 @@ const RING_RATE = 8 // damp() rate for the proximity-ring radius follow
 const CHEVRON_RATE = 12 // damp() rate for edge-chevron position follow
 const THUMB_W = 154 // freeze-frame thumbnail width (px, CSS + capture)
 const THUMB_H = 104
-const DEFAULT_RADIUS = 24 // fallback selfie radius if registry omits one
+const DEFAULT_RADIUS = 24 * WORLD_SCALE // fallback selfie radius if registry omits one
 const NEAR_HYSTERESIS = 1.15 // leave-radius is a touch larger than enter (no flicker)
 const RING_LEAD = 2.4 // proximity ring becomes visible within radius*lead
 const FRAME_MARGIN = 16 // px the edge-chevron keeps from the viewport edge

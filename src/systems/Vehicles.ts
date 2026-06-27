@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { GameContext, GameSystem } from '../core/types'
 import { PAL } from '../art/palette'
 import { damp } from '../plane/flight'
+import { WORLD_SCALE } from '../world/WorldConfig'
 
 /**
  * Vehicles — the player's rideable, swappable low-poly craft.
@@ -590,8 +591,15 @@ export function createVehiclesSystem(): GameSystem {
       // Build both rigs and parent them under the player flight object.
       const biplane = buildBiplane()
       const carpet = buildCarpet()
-      ctx.player.obj.add(biplane)
-      ctx.player.obj.add(carpet)
+      // Scale the craft to the world: the rigs are authored at radius-100 size,
+      // and the swap-pop animates each rig's OWN .scale to settle at 1 — so we
+      // scale a parent HOLDER (× WORLD_SCALE) rather than fight that animation.
+      const rigHolder = new THREE.Group()
+      rigHolder.name = 'rig-holder'
+      rigHolder.scale.setScalar(WORLD_SCALE)
+      ctx.player.obj.add(rigHolder)
+      rigHolder.add(biplane)
+      rigHolder.add(carpet)
 
       rigs.push({ id: 'biplane', label: 'Coral Biplane', group: biplane, unlocked: true })
       rigs.push({ id: 'carpet', label: 'Magic Carpet', group: carpet, unlocked: false })

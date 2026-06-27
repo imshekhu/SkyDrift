@@ -1,10 +1,11 @@
 import * as THREE from 'three'
 import type { GameContext, GameSystem } from '../core/types'
 import { damp } from '../plane/flight'
+import { WORLD_SCALE, DOME_RADIUS } from '../world/WorldConfig'
 
 /**
  * Sky — TinySkies-faithful atmosphere: a RADIAL multi-stop gradient sky DOME
- * driven by a 195-second day/night cycle (6 segments) that smoothly blends a
+ * driven by a 180-second day/night cycle (6 segments) that smoothly blends a
  * full SkyPreset (gradient + fog + all three scene lights + ocean tints) across
  * every transition.
  *
@@ -112,29 +113,29 @@ const NIGHT_PRESET: SkyPreset = {
   stars: true, aurora: true,
 }
 
-// ===== Cycle timeline (195s, 6 segments) ====================================
-// 0-60 Day · 60-75 Day→Evening · 75-105 Evening · 105-120 Evening→Night ·
-// 120-180 Night · 180-195 Night→Day. Each segment names the two presets to lerp
+// ===== Cycle timeline (180s, 6 segments) ====================================
+// 0-55 Day · 55-70 Day→Evening · 70-95 Evening · 95-110 Evening→Night ·
+// 110-165 Night · 165-180 Night→Day. Each segment names the two presets to lerp
 // between and the local fraction; "hold" segments lerp a preset onto itself.
-const CYCLE_SECONDS = 195
+const CYCLE_SECONDS = 180
 interface Segment { t0: number; t1: number; a: SkyPreset; b: SkyPreset }
 const SEGMENTS: Segment[] = [
-  { t0: 0, t1: 60, a: DAY_PRESET, b: DAY_PRESET }, // Day (hold)
-  { t0: 60, t1: 75, a: DAY_PRESET, b: EVENING_PRESET }, // Day → Evening
-  { t0: 75, t1: 105, a: EVENING_PRESET, b: EVENING_PRESET }, // Evening (hold)
-  { t0: 105, t1: 120, a: EVENING_PRESET, b: NIGHT_PRESET }, // Evening → Night
-  { t0: 120, t1: 180, a: NIGHT_PRESET, b: NIGHT_PRESET }, // Night (hold)
-  { t0: 180, t1: 195, a: NIGHT_PRESET, b: DAY_PRESET }, // Night → Day
+  { t0: 0, t1: 55, a: DAY_PRESET, b: DAY_PRESET }, // Day (hold)
+  { t0: 55, t1: 70, a: DAY_PRESET, b: EVENING_PRESET }, // Day → Evening
+  { t0: 70, t1: 95, a: EVENING_PRESET, b: EVENING_PRESET }, // Evening (hold)
+  { t0: 95, t1: 110, a: EVENING_PRESET, b: NIGHT_PRESET }, // Evening → Night
+  { t0: 110, t1: 165, a: NIGHT_PRESET, b: NIGHT_PRESET }, // Night (hold)
+  { t0: 165, t1: 180, a: NIGHT_PRESET, b: DAY_PRESET }, // Night → Day
 ]
 
 // ---- Dome / cycle constants ------------------------------------------------
-const DOME_RADIUS = 1200 // < camera far plane (1400); recentred on camera each frame
+// DOME_RADIUS imported from WorldConfig (derived from world size; < camera far).
 const RAMP_SIZE = 256 // vertical resolution of the gradient ramp texture
 const RAMP_HZ = 4 // rebuild the ramp 4× per second (cheap)
 // Fog scaled to PLANET_RADIUS=100 + altitude. Per-phase the band tightens at
 // dusk/night so the far hemisphere dissolves into the warm/violet horizon.
-const FOG_NEAR_DAY = 70, FOG_FAR_DAY = 340
-const FOG_NEAR_NIGHT = 55, FOG_FAR_NIGHT = 250
+const FOG_NEAR_DAY = 70 * WORLD_SCALE, FOG_FAR_DAY = 340 * WORLD_SCALE
+const FOG_NEAR_NIGHT = 55 * WORLD_SCALE, FOG_FAR_NIGHT = 250 * WORLD_SCALE
 
 // ---- module-scoped temporaries (zero per-frame allocation) -----------------
 const _camWorld = new THREE.Vector3()
@@ -283,9 +284,10 @@ export function createSkySystem(): GameSystem {
 
     // --- sun elevation arc (drives the disc; extras own the moon) ----------
     // Continuous over the full cycle: noon overhead → dips below at night.
-    // phaseT01 noon≈.154 (day mid), midnight≈.769 (night mid). cos peaks at .154.
+    // phaseT01 noon≈.153 (day mid = 27.5/180), midnight≈.653 lands in the Night
+    // hold (110-165 → .611-.917). cos peaks (=+1) at .153, troughs (=-1) at .653.
     const p01 = tCycle / CYCLE_SECONDS
-    _out.sunElev = Math.cos((p01 - 0.154) * Math.PI * 2)
+    _out.sunElev = Math.cos((p01 - 0.153) * Math.PI * 2)
 
     return _out
   }
@@ -419,7 +421,7 @@ export function createSkySystem(): GameSystem {
 
     update(_dt: number, ctx: GameContext) {
       // --- advance the cycle clock ---------------------------------------
-      const tCycle = ctx.elapsed() % CYCLE_SECONDS // 0..195
+      const tCycle = ctx.elapsed() % CYCLE_SECONDS // 0..180
       const out = sample(tCycle)
       const phaseT01 = tCycle / CYCLE_SECONDS
 

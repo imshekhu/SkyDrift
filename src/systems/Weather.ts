@@ -1,66 +1,47 @@
 import * as THREE from 'three'
-import type { GameContext, GameSystem } from '../core/types'
-import { damp } from '../plane/flight'
+import type { GameContext, GameSystem, RegionDef } from '../core/types'
+import { damp, TUNING } from '../plane/flight'
+import { WORLD_SCALE } from '../world/WorldConfig'
 
 /**
- * Weather — faithful TinySkies RAIN as a camera-locked, screen-space overlay.
+ * Weather — LOCALIZED STORM ENTITIES.
  *
- * Render strategy (mobile-safe): instead of a second OrthographicCamera pass
- * rendered after the scene (which fights this project's EffectComposer — the
- * composer owns the only render() call, and systems update() BEFORE it), the
- * rain is a small group PARENTED to the camera and pinned just inside the near
- * plane. It therefore travels with the view, always faces it, and the existing
- * composer draws it for free every frame. depthTest:false + a tiny camera-space
- * Z keeps it on top of the world without z-fighting; fog:false keeps it crisp.
+ * The rain VISUAL is no longer owned here: a windshield post-processing shader
+ * (published by another file at `(ctx as any).rainPass`) draws the on-glass rain.
+ * Weather's job is now purely SIMULATION + DRIVE:
  *
- *   (1) STREAKS — ~180 thin tapered quads (the recipe's streak shader), additive,
- *       canted to a slight wind angle (~0.35rad). They fall down screen space and
- *       wrap, so a fixed pool tiles the viewport forever (zero churn). Opacity is
- *       driven by a smoothly-ramped rainIntensity01 (fade in/out over ~2s).
- *   (2) GLASS DROPLETS — an OPTIONAL cheap full-screen lens pass: a single quad
- *       with a procedural raindrops-on-glass shader (no scene sampling, so it
- *       composites without a render-target round-trip — the costly refraction is
- *       faked with additive highlights). Auto-skipped on low-end (DPR<2 or coarse
- *       pointer) to protect the 60fps budget.
- *
- * Scheduling: mostly clear, with rain SPELLS (~20-40s) every ~90-150s. During a
- * spell we nudge the published sky fog ~15% darker, call ctx.audio.play("rain")
- * on a slow cadence (looping-ish — the audio bus has no sustained loop), and on
- * a DAYTIME spell's end we raise weather.rainbow for ~12s so sky-extras can show
- * an arc.
+ *   (1) STORMS — a fixed pool of localized storm discs scattered over the planet
+ *       surface (centred on region capitals). They spawn on a slow cadence, live
+ *       for ~70-110s, and fade in/out so they never pop. Zero churn: storms are
+ *       pooled and never allocate per spawn.
+ *   (2) PROXIMITY → INTENSITY — each frame we take the great-circle surface
+ *       distance from the player to every active storm centre, convert it to a
+ *       soft-core/rim intensity, and take the MAX across storms as the player's
+ *       rain intensity. It's smoothly ramped so flying into/out of a storm eases.
+ *   (3) DRIVE — that intensity feeds: the windshield shader (uIntensity + uSpeed),
+ *       a fog/light darken, and the sustained storm audio bed (ctx.audio.setStorm).
  *
  * Publishes (ctx as any).weather = { raining, rainIntensity01, rainbow }.
- * Reads (ctx as any).sky?.{ isNight, fogColor } when present (optional contract).
+ * Reads   (ctx as any).rainPass  — the windshield ShaderPass (may be undefined early).
+ *         (ctx as any).regions   — region defs (storm spawn centres).
+ *         (ctx as any).sky?.{ isNight, fogColor } when present (optional contract).
  *
- * Budget: zero per-frame allocation (module-scoped temporaries), one Instanced
- * draw for the streaks, one quad for the lens, no lights, pooled + wrapped.
+ * Budget: ZERO per-frame allocation (module-scoped temporaries), storms pooled.
  */
 
 // ---- Tunables --------------------------------------------------------------
-const STREAK_COUNT = 180
-const WIND_ANGLE = 0.35 // radians the streaks lean from vertical
-const FADE_K = 2.2 // damp() rate for the ~2s intensity fade in/out
-
-// The streak field lives on a virtual plane this many world-units in front of
-// the camera (just inside the near plane = 0.5). Streaks are sized to over-fill
-// the frustum at that depth so the screen is always covered at any aspect.
-const PLANE_Z = -0.62 // camera-space Z (negative = in front)
-const FIELD_HALF_W = 0.62 // half-width of the tiling field at PLANE_Z
-const FIELD_HALF_H = 0.62 // half-height
-const STREAK_LEN = 0.085 // long axis of a streak quad (camera-space units)
-const STREAK_WID = 0.0065 // short axis (thin)
-const FALL_SPEED = 1.9 // field-units / sec the streaks rain downward
-
-// Weather schedule (seconds).
-const SPELL_MIN = 20
-const SPELL_MAX = 40
-const GAP_MIN = 90
-const GAP_MAX = 150
+const MAX_STORMS = 3 // pooled storm slots (never allocate per spawn)
+const STORM_INTERVAL = 60 // seconds between spawn attempts
 const RAINBOW_SECONDS = 12
+const INTENSITY_DAMP = 2.2 // damp() rate ramping rainIntensity01 toward target
+const STORM_RAMP_IN = 6 // s to fade a storm in over its first moments
+const STORM_RAMP_OUT = 8 // s to fade a storm out before it dies
 
 // ---- module-scoped temporaries (no per-frame allocation) -------------------
 const _fogCol = new THREE.Color()
 const _darkFog = new THREE.Color()
+const _playerDir = new THREE.Vector3()
+const _stormPos = new THREE.Vector3()
 // Cache the last fog hex so setClearColor is skipped when the colour hasn't changed.
 let _lastWeatherFogHex = -1
 
@@ -70,238 +51,153 @@ interface Weather {
   rainbow: boolean
 }
 
+/** A localized storm disc on the planet surface (pooled; never per-spawn alloc). */
+interface Storm {
+  active: boolean
+  dir: THREE.Vector3 // unit-length surface direction of the storm centre
+  radius: number // great-circle WORLD radius of the storm disc
+  age: number // seconds since spawn
+  life: number // total lifetime in seconds
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v
+}
+function clamp01(v: number): number {
+  return v < 0 ? 0 : v > 1 ? 1 : v
+}
+/** GLSL-style smoothstep. */
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  if (edge0 === edge1) return x < edge0 ? 0 : 1
+  const t = clamp01((x - edge0) / (edge1 - edge0))
+  return t * t * (3 - 2 * t)
+}
+
 export function createWeatherSystem(): GameSystem {
-  // Owned objects (assigned in init).
-  let rig: THREE.Group // parented to the camera; holds streaks + lens
-  let streaks: THREE.InstancedMesh
-  let streakMat: THREE.ShaderMaterial
-  let lens: THREE.Mesh | null = null
-  let lensMat: THREE.ShaderMaterial | null = null
-  let rainDom: HTMLDivElement | null = null // DOM rain overlay — reliable on-screen streaks
-
-  // Per-streak tiling state (parallel arrays → cache-friendly, no objects).
-  const sx = new Float32Array(STREAK_COUNT) // field x in [-1,1]
-  const sy = new Float32Array(STREAK_COUNT) // field y in [-1,1] (wraps)
-  const sScale = new Float32Array(STREAK_COUNT) // length jitter
-  const sSpeed = new Float32Array(STREAK_COUNT) // per-streak fall speed mult
-
-  // Reused matrix/quat/scale for instance composition.
-  const _m = new THREE.Matrix4()
-  const _q = new THREE.Quaternion()
-  const _pos = new THREE.Vector3()
-  const _scl = new THREE.Vector3()
-  // The streak quad is canted by the wind angle once; all instances share it.
-  const _windQuat = new THREE.Quaternion().setFromAxisAngle(
-    new THREE.Vector3(0, 0, 1),
-    WIND_ANGLE
-  )
+  // Pooled storms — created ONCE in the closure; each has its own reusable dir.
+  const storms: Storm[] = []
+  for (let i = 0; i < MAX_STORMS; i++) {
+    storms.push({
+      active: false,
+      dir: new THREE.Vector3(),
+      radius: 0,
+      age: 0,
+      life: 0,
+    })
+  }
 
   // Published shared state (other systems read this off the context).
   const weather: Weather = { raining: false, rainIntensity01: 0, rainbow: false }
 
-  // Scheduler state.
-  let phaseTimer = 0 // counts down within the current clear/rain phase
-  let raining = false
-  let target01 = 0 // 0 (clear) or 1 (raining) — the fade target
+  // Scheduler / transition state.
+  let spawnTimer = STORM_INTERVAL
   let rainbowTimer = 0
-  let sfxTimer = 0 // throttle for the looping-ish rain SFX
-  let lowEnd = false
+  let wasRaining = false // for the raining→clear rainbow trigger
 
-  /** Range helper on the seeded RNG. */
-  function rng(ctx: GameContext, lo: number, hi: number): number {
-    return lo + ctx.rand() * (hi - lo)
+  /** A random unit surface direction (fallback when regions are absent). */
+  function randomDir(ctx: GameContext, out: THREE.Vector3): void {
+    // uniform-ish on the sphere from the seeded RNG, then normalized
+    out.set(
+      ctx.rand() * 2 - 1,
+      ctx.rand() * 2 - 1,
+      ctx.rand() * 2 - 1
+    )
+    if (out.lengthSq() < 1e-6) out.set(0, 1, 0)
+    out.normalize()
   }
 
-  /** Re-seed one streak above the top of the field after it falls off bottom. */
-  function recycleStreak(i: number, ctx: GameContext): void {
-    sx[i] = ctx.rand() * 2 - 1
-    sScale[i] = 0.7 + ctx.rand() * 0.8
-    sSpeed[i] = 0.75 + ctx.rand() * 0.6
+  /** Activate an inactive storm slot, if one exists. */
+  function trySpawn(ctx: GameContext): void {
+    let storm: Storm | null = null
+    for (let i = 0; i < storms.length; i++) {
+      if (!storms[i].active) {
+        storm = storms[i]
+        break
+      }
+    }
+    if (!storm) return // pool saturated; skip this spell
+
+    // Spawn centre = a random region capital, else a random unit dir.
+    const regions = (ctx as any).regions as
+      | { defs: RegionDef[] }
+      | undefined
+    const defs = regions?.defs
+    if (defs && defs.length > 0) {
+      const r = defs[Math.floor(ctx.rand() * defs.length)]
+      storm.dir.copy(r.capital).normalize()
+    } else {
+      randomDir(ctx, storm.dir)
+    }
+
+    storm.radius = (90 + ctx.rand() * 70) * WORLD_SCALE // great-circle WORLD radius
+    storm.life = 70 + ctx.rand() * 40
+    storm.age = 0
+    storm.active = true
   }
 
   return {
     name: 'weather',
 
     init(ctx: GameContext) {
-      // DOM rain overlay: screen-blended diagonal streaks; opacity tracks intensity.
-      rainDom = document.createElement('div')
-      rainDom.style.cssText =
-        'position:fixed;inset:0;pointer-events:none;opacity:0;z-index:6;mix-blend-mode:screen;background-image:repeating-linear-gradient(100deg,transparent 0,transparent 7px,rgba(225,235,250,.5) 7px,rgba(225,235,250,.5) 8px,transparent 8px,transparent 15px);background-size:100% 22px;animation:sdrain .55s linear infinite;transition:opacity .4s'
-      ctx.hud.root.appendChild(rainDom)
-      if (!document.getElementById('sdrain-kf')) {
-        const st = document.createElement('style')
-        st.id = 'sdrain-kf'
-        st.textContent = '@keyframes sdrain{from{background-position:0 0}to{background-position:-70px 220px}}'
-        document.head.appendChild(st)
-      }
-      // --- camera-locked rig ---------------------------------------------
-      rig = new THREE.Group()
-      rig.name = 'weather'
-      // Render after the world; matrices are driven by the camera parent.
-      rig.renderOrder = 5
-      ctx.camera.add(rig)
-      // The camera itself must be in the scene graph for child overlays to draw
-      // through the composer's RenderPass. main.ts adds the planeObj/world but
-      // not necessarily the camera, so ensure it's attached.
-      if (!ctx.camera.parent) ctx.scene.add(ctx.camera)
-
-      // Decide quality once (cheap droplet lens only on capable devices).
-      const dpr = Math.min(window.devicePixelRatio || 1, 2)
-      const coarse =
-        typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
-      lowEnd = dpr < 2 || coarse
-
-      // --- STREAKS: one tapered-quad geometry, instanced -----------------
-      // A unit quad on XY (length along Y, width along X) → the recipe's shader
-      // reads vUv.y as "along" and vUv.x as "across".
-      const quad = new THREE.PlaneGeometry(1, 1, 1, 1)
-      streakMat = new THREE.ShaderMaterial({
-        transparent: true,
-        depthTest: false,
-        depthWrite: false,
-        fog: false,
-        blending: THREE.NormalBlending, // normal (not additive) so streaks read on bright sky
-        toneMapped: false,
-        uniforms: {
-          uOpacity: { value: 0 },
-          uColor: { value: new THREE.Color(0.88, 0.92, 0.99) },
-        },
-        vertexShader: /* glsl */ `
-          varying vec2 vUv;
-          void main() {
-            vUv = uv;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-          }
-        `,
-        // Faithful to the recipe: taper along the streak + a soft across falloff.
-        fragmentShader: /* glsl */ `
-          precision mediump float;
-          uniform float uOpacity;
-          uniform vec3 uColor;
-          varying vec2 vUv;
-          void main() {
-            float along = vUv.y;
-            float taper = smoothstep(0.0, 0.15, along) * smoothstep(1.0, 0.7, along);
-            float across = abs(vUv.x - 0.5) * 2.0;
-            float shape = (1.0 - smoothstep(0.0, 1.0, across)) * taper;
-            gl_FragColor = vec4(uColor, shape * uOpacity);
-          }
-        `,
-      })
-      streaks = new THREE.InstancedMesh(quad, streakMat, STREAK_COUNT)
-      streaks.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
-      streaks.frustumCulled = false
-      streaks.renderOrder = 5
-      streaks.matrixAutoUpdate = false
-      rig.add(streaks)
-
-      // Seed the field: x random, y spread across the field, jittered size/speed.
-      for (let i = 0; i < STREAK_COUNT; i++) {
-        recycleStreak(i, ctx)
-        sy[i] = ctx.rand() * 2 - 1 // already scattered top→bottom
-      }
-
-      // --- optional GLASS-DROPLET lens (full-screen procedural) ----------
-      if (!lowEnd) {
-        const lensGeo = new THREE.PlaneGeometry(2, 2) // covers the field plane
-        lensMat = new THREE.ShaderMaterial({
-          transparent: true,
-          depthTest: false,
-          depthWrite: false,
-          fog: false,
-          blending: THREE.AdditiveBlending,
-          toneMapped: false,
-          uniforms: {
-            uTime: { value: 0 },
-            uOpacity: { value: 0 },
-          },
-          vertexShader: /* glsl */ `
-            varying vec2 vUv;
-            void main() {
-              vUv = uv;
-              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-            }
-          `,
-          // Cheap "drops on the lens": a few scrolling cells, each with a bright
-          // rim highlight. No scene sampling (so no render-target), additive, so
-          // it reads as light catching on glass beads rather than true refraction.
-          fragmentShader: /* glsl */ `
-            precision mediump float;
-            uniform float uTime;
-            uniform float uOpacity;
-            varying vec2 vUv;
-            float hash(vec2 p) {
-              return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-            }
-            void main() {
-              // a sparse grid of slowly-sliding droplets
-              vec2 uv = vUv * vec2(7.0, 5.0);
-              uv.y += uTime * 0.18;
-              vec2 cell = floor(uv);
-              vec2 f = fract(uv) - 0.5;
-              float r = hash(cell);
-              // jitter each drop's centre + size; many cells stay empty
-              f -= (vec2(hash(cell + 3.1), hash(cell + 7.7)) - 0.5) * 0.6;
-              float present = step(0.62, r);
-              float d = length(f) * (1.6 + r);
-              // bright thin rim = the glassy edge highlight
-              float rim = smoothstep(0.42, 0.34, d) * smoothstep(0.18, 0.30, d);
-              float bead = smoothstep(0.30, 0.0, d) * 0.25;
-              float a = (rim * 0.8 + bead) * present;
-              gl_FragColor = vec4(vec3(0.8, 0.85, 0.95) * a, a * uOpacity);
-            }
-          `,
-        })
-        lens = new THREE.Mesh(lensGeo, lensMat)
-        lens.frustumCulled = false
-        lens.renderOrder = 6 // in front of the streaks
-        lens.matrixAutoUpdate = false
-        lens.position.set(0, 0, PLANE_Z + 0.01)
-        lens.scale.set(FIELD_HALF_W * 2, FIELD_HALF_H * 2, 1)
-        lens.updateMatrix()
-        rig.add(lens)
-      }
-
-      // Seed the scheduler: start clear, first spell after a normal gap.
-      raining = false
-      target01 = 0
-      phaseTimer = rng(ctx, GAP_MIN, GAP_MAX)
-
       // Publish the shared contract immediately so first-frame readers see it.
       weather.raining = false
       weather.rainIntensity01 = 0
       weather.rainbow = false
       ;(ctx as any).weather = weather
+
+      spawnTimer = STORM_INTERVAL
+      rainbowTimer = 0
+      wasRaining = false
     },
 
     update(dt: number, ctx: GameContext) {
-      // --- scheduler: flip between clear gaps and rain spells -------------
-      phaseTimer -= dt
-      if (phaseTimer <= 0) {
-        if (raining) {
-          // Spell ends. If it's daytime, leave a rainbow for a while.
-          const sky = (ctx as any).sky
-          const isNight = sky ? !!sky.isNight : false
-          if (!isNight) rainbowTimer = RAINBOW_SECONDS
-          raining = false
-          target01 = 0
-          phaseTimer = rng(ctx, GAP_MIN, GAP_MAX)
-        } else {
-          // Clear gap ends → start a rain spell.
-          raining = true
-          target01 = 1
-          phaseTimer = rng(ctx, SPELL_MIN, SPELL_MAX)
-        }
+      // --- spawn cadence -------------------------------------------------
+      spawnTimer -= dt
+      if (spawnTimer <= 0) {
+        trySpawn(ctx)
+        spawnTimer = STORM_INTERVAL
       }
 
-      // --- smooth fade of intensity toward the target (≈2s in/out) -------
-      const k = damp(FADE_K, dt)
-      weather.rainIntensity01 += (target01 - weather.rainIntensity01) * k
+      // --- advance storms; deactivate the expired -----------------------
+      for (let i = 0; i < storms.length; i++) {
+        const s = storms[i]
+        if (!s.active) continue
+        s.age += dt
+        if (s.age >= s.life) s.active = false
+      }
+
+      // --- proximity → target intensity (max across active storms) ------
+      _playerDir.copy(ctx.player.obj.position).normalize()
+      let target = 0
+      for (let i = 0; i < storms.length; i++) {
+        const s = storms[i]
+        if (!s.active) continue
+        _stormPos.copy(s.dir)
+        // great-circle SURFACE distance from the storm centre to the player
+        const ang = Math.acos(clamp(_playerDir.dot(_stormPos), -1, 1))
+        const surfDist = ang * ctx.planet.radius
+        // soft core + rim: 1 inside ~45% of the radius, smoothly 0 at the edge
+        let v = 1 - smoothstep(s.radius * 0.45, s.radius, surfDist)
+        // fade the storm in over its first moments and out before it dies
+        const fadeIn = smoothstep(0, STORM_RAMP_IN, s.age)
+        const fadeOut = smoothstep(0, STORM_RAMP_OUT, s.life - s.age)
+        v *= fadeIn * fadeOut
+        if (v > target) target = v
+      }
+
+      // --- smooth ramp toward target ------------------------------------
+      weather.rainIntensity01 += (target - weather.rainIntensity01) * damp(INTENSITY_DAMP, dt)
       if (weather.rainIntensity01 < 0.001) weather.rainIntensity01 = 0
       const inten = weather.rainIntensity01
+      const raining = inten > 0.02
       weather.raining = raining
 
-      // --- rainbow countdown --------------------------------------------
+      // --- rainbow: raining→clear during DAYTIME leaves an arc for ~12s --
+      if (wasRaining && !raining) {
+        const isNight = !!(ctx as any).sky?.isNight
+        if (!isNight) rainbowTimer = RAINBOW_SECONDS
+      }
+      wasRaining = raining
       if (rainbowTimer > 0) {
         rainbowTimer -= dt
         if (rainbowTimer < 0) rainbowTimer = 0
@@ -311,26 +207,27 @@ export function createWeatherSystem(): GameSystem {
       // Republish (in case another system replaced the object reference).
       ;(ctx as any).weather = weather
 
-      // --- skip all visual work when bone-dry ----------------------------
-      streaks.visible = inten > 0.002
-      if (rainDom) rainDom.style.opacity = String(Math.min(1, inten * 0.95))
-      if (lens) lens.visible = inten > 0.002
-      if (inten <= 0.002) {
-        streakMat.uniforms.uOpacity.value = 0
-        return
+      // --- drive the windshield shader (read fresh; may be undefined early)
+      const rainPass = (ctx as any).rainPass
+      if (rainPass) {
+        rainPass.uniforms.uIntensity.value = inten
+        rainPass.uniforms.uSpeed.value = clamp01(
+          (ctx.player.flight.speed - TUNING.CRUISE_SPEED) /
+            (TUNING.BOOST_SPEED - TUNING.CRUISE_SPEED)
+        )
       }
 
-      // --- darken the published fog ~15% while raining -------------------
-      // The Sky system owns scene.fog; we only NUDGE its colour, lerping back as
-      // rain clears so we never fight Sky's own day/night colour drift.
+      // --- storm audio bed ----------------------------------------------
+      ctx.audio.setStorm?.(inten)
+
+      // --- fog darken (Sky owns the colour; we only nudge it darker) ----
+      // Lerps back out as inten→0 because Sky re-asserts the colour each frame.
       const sky = (ctx as any).sky
-      if (sky && typeof sky.fogColor === 'number') {
+      if (inten > 0.002 && sky && typeof sky.fogColor === 'number') {
         _fogCol.setHex(sky.fogColor)
-        _darkFog.copy(_fogCol).multiplyScalar(1 - 0.42 * inten)
+        _darkFog.copy(_fogCol).multiplyScalar(1 - 0.4 * inten)
         const f = ctx.scene.fog as THREE.Fog | null
         if (f && (f as any).isFog) {
-          // ease toward the darkened colour; Sky will re-assert next frame and we
-          // re-darken — net effect is a steady ~15% dim that tracks the cycle.
           f.color.lerp(_darkFog, damp(3.0, dt))
           const fh = f.color.getHex()
           if (fh !== _lastWeatherFogHex) {
@@ -339,52 +236,6 @@ export function createWeatherSystem(): GameSystem {
           }
         }
       }
-
-      // --- looping-ish rain SFX (throttled; the bus has no sustained loop) -
-      sfxTimer -= dt
-      if (sfxTimer <= 0) {
-        ctx.audio.play('rain', { volume: 0.18 + 0.22 * inten })
-        sfxTimer = 1.4 + ctx.rand() * 0.9
-      }
-
-      // --- animate + advance the streak field ----------------------------
-      const dy = FALL_SPEED * dt
-      streakMat.uniforms.uOpacity.value = 0.9 * inten
-      for (let i = 0; i < STREAK_COUNT; i++) {
-        // fall downward (in field space), wrap, recycle x/size when re-entering.
-        let y = sy[i] - dy * sSpeed[i]
-        if (y < -1.15) {
-          y += 2.3
-          recycleStreak(i, ctx)
-        }
-        sy[i] = y
-
-        // map field [-1,1] → camera-space position on the PLANE_Z plane
-        _pos.set(sx[i] * FIELD_HALF_W, y * FIELD_HALF_H, PLANE_Z)
-        const len = STREAK_LEN * sScale[i]
-        _scl.set(STREAK_WID, len, 1)
-        _q.copy(_windQuat)
-        _m.compose(_pos, _q, _scl)
-        streaks.setMatrixAt(i, _m)
-      }
-      streaks.instanceMatrix.needsUpdate = true
-
-      // --- droplet lens shimmer -----------------------------------------
-      if (lens && lensMat) {
-        lensMat.uniforms.uTime.value = ctx.elapsed()
-        // lens lags the streaks a touch + is subtler (it's the "on the canopy" cue)
-        lensMat.uniforms.uOpacity.value = 0.5 * Math.max(0, inten - 0.15)
-      }
-    },
-
-    dispose() {
-      streaks.geometry.dispose()
-      streakMat.dispose()
-      if (lens) {
-        lens.geometry.dispose()
-        lensMat?.dispose()
-      }
-      rig.parent?.remove(rig)
     },
   }
 }

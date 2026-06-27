@@ -324,13 +324,10 @@ export function createBoostSystem(): GameSystem {
 
       active = nextActive
 
-      // ---- gate Flight: it reads ctx.input.boost, so suppress it when empty ----
-      // Publish the authoritative flag for other systems (camera/audio/hud).
+      // Publish the authoritative boost flag for other systems (camera/audio/hud/trails).
+      // Flight's SPEED is now throttle-driven (not input.boost-driven), so we no longer
+      // force input.boost = false here; the meter simply gates the boost FX + trail.
       ;(ctx as any).boostActive = active
-      if (!active && ctx.input.boost) {
-        // out of charge but key still held → don't let Flight keep accelerating
-        ctx.input.boost = false
-      }
 
       // ---- forward impulse on top of Flight's own speed ramp (snappier kick) ----
       if (active) {

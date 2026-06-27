@@ -36,6 +36,7 @@ const MASTER_GAIN = 0.82
 const MUSIC_GAIN = 0.1 // a whisper-quiet pad, never competes with SFX
 const MELODY_GAIN = 0.06 // softer still — a few wandering notes, not a tune
 const WIND_GAIN_MAX = 0.17
+const STORM_GAIN_MAX = 0.16 // sustained storm-rain bed ceiling (mirrors wind bed)
 const ENGINE_GAIN_MIN = 0.05
 const ENGINE_GAIN_MAX = 0.2
 const ENGINE_HZ_MIN = 60 // idle/cruise rumble (fundamental of the saws)
@@ -136,6 +137,10 @@ export function createAudioSystem(): { system: GameSystem; bus: AudioBus } {
   let windGain: GainNode | null = null
   let windFilter: BiquadFilterNode | null = null
   let windSrc: AudioBufferSourceNode | null = null
+
+  // storm-rain bed (sustained; mirrors the wind bed)
+  let stormGain: GainNode | null = null
+  let stormSrc: AudioBufferSourceNode | null = null
 
   // music pad
   let musicGain: GainNode | null = null
@@ -272,6 +277,33 @@ export function createAudioSystem(): { system: GameSystem; bus: AudioBus } {
     windFilter.connect(windGain)
     windGain.connect(master)
     windSrc.start()
+
+    // ===================== storm-rain bed =====================
+    // looping noise through a lowpass (the body of the downpour) PLUS a parallel
+    // highpass layer for airy hiss, summed into a dedicated stormGain → master.
+    // Level is driven by setStorm() from the player's storm proximity intensity.
+    stormGain = ac.createGain()
+    stormGain.gain.value = 0.0001
+    stormGain.connect(master)
+    const stormLow = ac.createBiquadFilter()
+    stormLow.type = 'lowpass'
+    stormLow.frequency.value = 1800
+    stormLow.Q.value = 0.6
+    stormLow.connect(stormGain)
+    const stormHigh = ac.createBiquadFilter()
+    stormHigh.type = 'highpass'
+    stormHigh.frequency.value = 3200
+    stormHigh.Q.value = 0.5
+    const stormHissGain = ac.createGain()
+    stormHissGain.gain.value = 0.35 // subtler airy hiss over the body
+    stormHigh.connect(stormHissGain)
+    stormHissGain.connect(stormGain)
+    stormSrc = ac.createBufferSource()
+    stormSrc.buffer = noiseBuf
+    stormSrc.loop = true
+    stormSrc.connect(stormLow)
+    stormSrc.connect(stormHigh)
+    stormSrc.start()
 
     // ===================== ambient music pad =====================
     // detuned sines through a slow LFO-swept lowpass — a "breathing" chord
@@ -454,6 +486,15 @@ export function createAudioSystem(): { system: GameSystem; bus: AudioBus } {
     if (windFilter) {
       windFilter.frequency.setTargetAtTime(450 + 1500 * s, now, PARAM_GLIDE)
     }
+  }
+
+  // ----- sustained storm-rain bed from normalized intensity [0..1] -----
+  // Driven each frame by the Weather system from the player's storm proximity.
+  function setStorm(intensity01: number) {
+    if (!ctxA || !unlocked || !stormGain) return
+    const s = intensity01 < 0 ? 0 : intensity01 > 1 ? 1 : intensity01
+    // gentle 0.3s smoothing so storms ramp in/out without a click (no per-call alloc)
+    stormGain.gain.setTargetAtTime(STORM_GAIN_MAX * s, ctxA.currentTime, 0.3)
   }
 
   // ----- one SFX voice: built per call, self-cleaning on 'ended' -----
@@ -646,6 +687,7 @@ export function createAudioSystem(): { system: GameSystem; bus: AudioBus } {
   const bus: AudioBus = {
     play,
     setEngine,
+    setStorm,
     unlock: doUnlock,
   }
 
@@ -689,6 +731,7 @@ export function createAudioSystem(): { system: GameSystem; bus: AudioBus } {
         whirOsc?.stop()
         whirLfo?.stop()
         windSrc?.stop()
+        stormSrc?.stop()
         padLfo?.stop()
         for (const o of padOscs) o.stop()
       } catch {

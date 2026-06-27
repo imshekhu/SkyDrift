@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { GameContext, GameSystem } from '../core/types'
 import { PAL } from '../art/palette'
+import { WORLD_SCALE } from '../world/WorldConfig'
 
 /**
  * Celestial — the sky spectacle layer. Everything here is cheap, instanced/pooled,
@@ -24,8 +25,6 @@ import { PAL } from '../art/palette'
  * per-frame in update().
  */
 
-const PLANET_RADIUS = 100
-
 // ---- Day/night cycle -------------------------------------------------------
 // One full day every DAY_LENGTH seconds. phase in [0,1): 0=dawn .25=noon .5=dusk
 // .75=midnight. nightAmount is a smooth 0..1 (0 = bright day, 1 = deep night).
@@ -41,6 +40,7 @@ const FIREFLY_CLUSTERS = 4
 const FIREFLIES_PER_CLUSTER = 24
 const METEOR_COUNT = 16 // pooled streaks; a "shower" lights several at once
 const METEOR_TRAIL_PTS = 9 // points along a trail → smoother taper
+const STAR_COUNT = 1200 // starfield points on a large camera-centred shell
 
 // ---- Published atmosphere contract (read from Sky) -------------------------
 // Sky publishes the live blended day/night state each frame at (ctx as any).sky.
@@ -74,6 +74,7 @@ const _q = new THREE.Quaternion()
 const _m = new THREE.Matrix4()
 const _scale = new THREE.Vector3()
 const _col = new THREE.Color()
+const _camTmp = new THREE.Vector3() // star recentre (zero per-frame alloc)
 
 // smooth 0..1 ramp
 const smoothstep = (e0: number, e1: number, x: number): number => {
@@ -108,6 +109,11 @@ interface FireflyCluster {
 }
 
 export function createCelestialSystem(): GameSystem {
+  // Real planet radius (captured at init). All world-space altitude offsets layered
+  // on top of R are additionally scaled by WORLD_SCALE so the spectacle sits in the
+  // right band over the (640) planet rather than buried inside it.
+  let R = 100
+
   // Owned objects (assigned in init).
   let group: THREE.Group
   let auroraMat: THREE.ShaderMaterial
@@ -132,6 +138,8 @@ export function createCelestialSystem(): GameSystem {
   let godrayMat: THREE.SpriteMaterial
   let sunHalo: THREE.Sprite
   let sunHaloMat: THREE.SpriteMaterial
+  let stars: THREE.Points
+  let starsMat: THREE.PointsMaterial
   const sunDir = new THREE.Vector3(0.3, 0.7, 0.4).normalize()
 
   // reusable warm meteor colours (head → tail) so we don't alloc per spawn
@@ -211,7 +219,7 @@ export function createCelestialSystem(): GameSystem {
       `,
     })
 
-    const shellR = PLANET_RADIUS + 95
+    const shellR = R + 95 * WORLD_SCALE
     for (let r = 0; r < AURORA_RIBBONS; r++) {
       const geo = new THREE.PlaneGeometry(1, 1, AURORA_SEGMENTS, AURORA_WIDTH_SEGS)
       // Re-wrap the flat plane onto a curved band high over one hemisphere.
@@ -221,7 +229,7 @@ export function createCelestialSystem(): GameSystem {
       const lat = 0.45 + (hash01(r * 3.1 + 1) - 0.5) * 0.5 // band center (radians from equator)
       const lonSpan = 2.2 + hash01(r * 1.7) * 1.4 // how far around it sweeps
       const lonStart = ctx.rand() * TWO_PI
-      const height = 22 + hash01(r * 5.5) * 16
+      const height = (22 + hash01(r * 5.5) * 16) * WORLD_SCALE
       for (let i = 0; i < pos.count; i++) {
         const u = pos.getX(i) + 0.5 // 0..1 along ribbon
         const vUp = pos.getY(i) + 0.5 // 0..1 across height
@@ -300,8 +308,9 @@ export function createCelestialSystem(): GameSystem {
     const warmB = PAL.planeWing.clone().lerp(PAL.planeBody, 0.25) // warmer coral-gold
     for (let i = 0; i < LANTERN_COUNT; i++) {
       lanternDir.push(randomUnitDir(ctx))
-      lanternRise[i] = ctx.rand() * 70 // staggered start heights
-      lanternSpeed[i] = 2.6 + ctx.rand() * 3.2
+      lanternRise[i] = ctx.rand() * 70 * WORLD_SCALE // staggered start heights
+      // rise speed scales with the band so rise TIME is unchanged over the big planet
+      lanternSpeed[i] = (2.6 + ctx.rand() * 3.2) * WORLD_SCALE
       lanternSpin[i] = ctx.rand() * TWO_PI
       lanternWobPhase[i] = ctx.rand() * TWO_PI
       const h = ctx.rand()
@@ -334,12 +343,12 @@ export function createCelestialSystem(): GameSystem {
       const home = new Float32Array(FIREFLIES_PER_CLUSTER * 3)
       const jit = new Float32Array(FIREFLIES_PER_CLUSTER * 4) // sx,sy,sz, speed
       // build a tangent frame at the surface point to scatter flies in a low patch
-      const center = ctx.planet.surfacePoint(base, 8)
+      const center = ctx.planet.surfacePoint(base, 8 * WORLD_SCALE)
       makeTangents(base, _v1, _v2)
       for (let i = 0; i < FIREFLIES_PER_CLUSTER; i++) {
-        const a = (ctx.rand() - 0.5) * 24
-        const b = (ctx.rand() - 0.5) * 24
-        const h = ctx.rand() * 7
+        const a = (ctx.rand() - 0.5) * 24 * WORLD_SCALE
+        const b = (ctx.rand() - 0.5) * 24 * WORLD_SCALE
+        const h = ctx.rand() * 7 * WORLD_SCALE
         _v0.copy(center).addScaledVector(_v1, a).addScaledVector(_v2, b).addScaledVector(base, h)
         arr[i * 3] = _v0.x
         arr[i * 3 + 1] = _v0.y
@@ -422,7 +431,7 @@ export function createCelestialSystem(): GameSystem {
       toneMapped: false,
     })
     godray = new THREE.Sprite(godrayMat)
-    godray.scale.setScalar(220)
+    godray.scale.setScalar(220 * WORLD_SCALE)
     godray.renderOrder = 0
     godray.frustumCulled = false
     group.add(godray)
@@ -439,10 +448,59 @@ export function createCelestialSystem(): GameSystem {
       toneMapped: false,
     })
     sunHalo = new THREE.Sprite(sunHaloMat)
-    sunHalo.scale.setScalar(520)
+    sunHalo.scale.setScalar(520 * WORLD_SCALE)
     sunHalo.renderOrder = 0
     sunHalo.frustumCulled = false
     group.add(sunHalo)
+  }
+
+  function buildStars(ctx: GameContext): void {
+    // ONE Points cloud of ~1200 stars on a big shell, recentred on the camera each
+    // frame so it reads as an infinite skybox. Positions + per-star colours are baked
+    // ONCE here (zero realloc thereafter); only material.opacity moves per frame.
+    const shellR = R + 300 * WORLD_SCALE
+    const positions = new Float32Array(STAR_COUNT * 3)
+    const colors = new Float32Array(STAR_COUNT * 3)
+    for (let i = 0; i < STAR_COUNT; i++) {
+      // seeded direction × shell radius (reuse the existing uniform-sphere helper)
+      const d = randomUnitDir(ctx)
+      const o = i * 3
+      positions[o] = d.x * shellR
+      positions[o + 1] = d.y * shellR
+      positions[o + 2] = d.z * shellR
+      // subtle per-star tint: mostly white, a few cool-blue, a few warm.
+      const tint = ctx.rand()
+      if (tint < 0.18) _col.setRGB(0.72, 0.80, 1.0) // cool blue-white
+      else if (tint > 0.86) _col.setRGB(1.0, 0.92, 0.80) // warm
+      else _col.setRGB(0.96, 0.97, 1.0) // soft white
+      // gentle brightness variance so the field doesn't look uniform
+      const b = 0.7 + ctx.rand() * 0.3
+      colors[o] = _col.r * b
+      colors[o + 1] = _col.g * b
+      colors[o + 2] = _col.b * b
+    }
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+    geo.computeBoundingSphere()
+
+    starsMat = new THREE.PointsMaterial({
+      size: 2.0,
+      sizeAttenuation: false, // screen-space size → stars read as an infinite skybox
+      map: makeStarTexture(), // soft round sprite
+      vertexColors: true, // per-star blue/white/warm variance
+      transparent: true,
+      opacity: 0, // fades in at night (driven in update)
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      fog: false,
+      toneMapped: false,
+    })
+    stars = new THREE.Points(geo, starsMat)
+    stars.frustumCulled = false
+    stars.renderOrder = -1 // behind the aurora (renderOrder 2) and meteors
+    stars.visible = false // hidden until night opacity rises
+    group.add(stars)
   }
 
   // ---- helpers -------------------------------------------------------------
@@ -541,12 +599,14 @@ export function createCelestialSystem(): GameSystem {
     }
     if (!m) return
     // Start high on the sky shell, travel along a tangent across the dome.
-    const shell = PLANET_RADIUS + 110 + ctx.rand() * 40
+    const shell = R + (110 + ctx.rand() * 40) * WORLD_SCALE
     const dir = randomUnitDir(ctx)
     m.origin.copy(dir).multiplyScalar(shell)
     makeTangents(dir, _v1, _v2)
     const ang = ctx.rand() * TWO_PI
-    const speed = 150 + ctx.rand() * 160 // varied — some lazy, some blazing
+    // authored (radius-100) speed, scaled to world size below
+    const speed0 = 150 + ctx.rand() * 160 // varied — some lazy, some blazing
+    const speed = speed0 * WORLD_SCALE
     m.vel
       .copy(_v1)
       .multiplyScalar(Math.cos(ang))
@@ -554,11 +614,11 @@ export function createCelestialSystem(): GameSystem {
       .normalize()
       .multiplyScalar(speed)
     // slight inward dip so they arc toward the horizon
-    m.vel.addScaledVector(dir, -20)
+    m.vel.addScaledVector(dir, -20 * WORLD_SCALE)
     m.maxLife = 1.0 + ctx.rand() * 1.1
     m.life = m.maxLife
     // faster streaks get longer trails; slow ones are short & gentle
-    m.len = 6 + ctx.rand() * 10 + (speed - 150) * 0.04
+    m.len = (6 + ctx.rand() * 10 + (speed0 - 150) * 0.04) * WORLD_SCALE
     m.bright = 0.7 + ctx.rand() * 0.3
     m.active = true
   }
@@ -658,6 +718,9 @@ export function createCelestialSystem(): GameSystem {
     name: 'celestial',
 
     init(ctx: GameContext): void {
+      // Capture the REAL planet radius so the spectacle sits in the right band
+      // over the scaled (640) planet instead of buried inside it.
+      R = ctx.planet.radius
       group = new THREE.Group()
       group.name = 'celestial'
       // sun direction: roughly toward the existing key light feel; high & warm.
@@ -668,6 +731,7 @@ export function createCelestialSystem(): GameSystem {
       buildFireflies(ctx)
       buildMeteors()
       buildGodRay()
+      buildStars(ctx)
 
       // upgrade firefly material with a soft sprite so points read as glow dots
       const fireTex = makeStarTexture()
@@ -677,7 +741,7 @@ export function createCelestialSystem(): GameSystem {
       }
 
       // place god ray far along sun direction (rotates with day/night below)
-      godray.position.copy(sunDir).multiplyScalar(PLANET_RADIUS + 400)
+      godray.position.copy(sunDir).multiplyScalar(R + 400 * WORLD_SCALE)
       sunHalo.position.copy(godray.position)
 
       ctx.scene.add(group)
@@ -715,7 +779,7 @@ export function createCelestialSystem(): GameSystem {
           Math.sin(sunAng) * 0.5
         )
         .normalize()
-      godray.position.copy(sunDir).multiplyScalar(PLANET_RADIUS + 400)
+      godray.position.copy(sunDir).multiplyScalar(R + 400 * WORLD_SCALE)
       sunHalo.position.copy(godray.position)
       // god ray strongest when sun is up AND we are looking toward it
       ctx.camera.getWorldDirection(_v0)
@@ -724,8 +788,19 @@ export function createCelestialSystem(): GameSystem {
       godrayMat.opacity = day * (0.12 + 0.5 * facing2)
       sunHaloMat.opacity = day * (0.05 + 0.22 * facing2)
       // gently pulse scale (shimmer in the rays)
-      godray.scale.setScalar(200 + Math.sin(t * 0.6) * 14)
-      sunHalo.scale.setScalar(480 + Math.sin(t * 0.4 + 1.5) * 30)
+      godray.scale.setScalar((200 + Math.sin(t * 0.6) * 14) * WORLD_SCALE)
+      sunHalo.scale.setScalar((480 + Math.sin(t * 0.4 + 1.5) * 30) * WORLD_SCALE)
+
+      // --- starfield --------------------------------------------------------
+      // Recentre on the camera so the field reads as an infinite skybox (zero alloc).
+      ctx.camera.getWorldPosition(_camTmp)
+      stars.position.copy(_camTmp)
+      // Fade in with night; gentle global twinkle. Eased so the crossfade is smooth.
+      const twinkle = 0.9 + 0.1 * Math.sin(t * 2.0)
+      const starOpacity = Math.min(1, Math.max(0, night * (0.6 + 0.4 * deepNight))) * twinkle
+      // ease toward the target (smooth crossfade, no per-vertex churn)
+      starsMat.opacity += (starOpacity - starsMat.opacity) * Math.min(1, dt * 3)
+      stars.visible = starsMat.opacity >= 0.01
 
       // --- aurora shimmer ---------------------------------------------------
       auroraMat.uniforms.uTime.value = t
@@ -744,7 +819,7 @@ export function createCelestialSystem(): GameSystem {
         for (let i = 0; i < LANTERN_COUNT; i++) {
           lanternRise[i] += lanternSpeed[i] * dt
           // fade lifecycle baked into rise height; respawn at top
-          if (lanternRise[i] > 92) {
+          if (lanternRise[i] > 92 * WORLD_SCALE) {
             lanternRise[i] = 0
             lanternDir[i].copy(randomUnitDir(ctx))
           }
@@ -753,10 +828,10 @@ export function createCelestialSystem(): GameSystem {
           // buoyant wobble: gentle, slowing as it climbs (thinner air feel)
           lanternSpin[i] += dt * (0.7 - rise * 0.003)
           const ph = lanternWobPhase[i]
-          const wobX = Math.sin(lanternSpin[i] + ph) * 1.6
-          const wobZ = Math.cos(lanternSpin[i] * 0.8 + ph) * 1.3
+          const wobX = Math.sin(lanternSpin[i] + ph) * 1.6 * WORLD_SCALE
+          const wobZ = Math.cos(lanternSpin[i] * 0.8 + ph) * 1.3 * WORLD_SCALE
           // surface point lifted by current rise height (write directly into _v0 — no alloc)
-          ctx.planet.surfacePoint(dir, 4 + rise, _v0)
+          ctx.planet.surfacePoint(dir, 4 * WORLD_SCALE + rise, _v0)
           // sway laterally on the tangent plane
           makeTangents(dir, _v1, _v2)
           _v0.addScaledVector(_v1, wobX).addScaledVector(_v2, wobZ)

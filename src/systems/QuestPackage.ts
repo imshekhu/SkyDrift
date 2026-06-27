@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { GameContext, GameSystem } from '../core/types'
 import { PAL } from '../art/palette'
 import { damp } from '../plane/flight'
+import { WORLD_SCALE } from '../world/WorldConfig'
 
 /**
  * QuestPackage — the cozy "courier" loop, faithfully recreating TinySkies'
@@ -35,14 +36,14 @@ import { damp } from '../plane/flight'
 
 // ----- tuning ---------------------------------------------------------------
 
-const PICKUP_RADIUS = 7 // proximity (world units) to grab the parcel
-const DELIVER_RADIUS = 8 // proximity (world units) to drop it off
+const PICKUP_RADIUS = 7 * WORLD_SCALE // proximity (world units) to grab the parcel
+const DELIVER_RADIUS = 8 * WORLD_SCALE // proximity (world units) to drop it off
 const REWARD_XP = 40 // XP granted on a completed delivery
 const BONUS_EVERY = 3 // every Nth delivery pays a bonus
 const BONUS_XP = 30 // extra XP on a bonus delivery
-const PICKUP_ALT = 4 // crate float height above the surface
-const BEACON_HEIGHT = 30 // pickup light-shaft height (world units)
-const BEAM_HEIGHT = 60 // delivery light-shaft height (world units)
+const PICKUP_ALT = 4 * WORLD_SCALE // crate float height above the surface
+const BEACON_HEIGHT = 30 * WORLD_SCALE // pickup light-shaft height (world units)
+const BEAM_HEIGHT = 60 * WORLD_SCALE // delivery light-shaft height (world units)
 const RESPAWN_DELAY = 0.3 // seconds between delivery and the next pickup
 const MIN_SEPARATION = 0.9 // max dot() between pickup & delivery dirs (≈ ≥25°)
 const BOB_AMPLITUDE = 0.7 // crate bob along its surface normal
@@ -55,7 +56,7 @@ const POP_TIME = 0.42 // seconds of the pickup "pop" squash-stretch
 const PICKUP_RADIUS_SQ = PICKUP_RADIUS * PICKUP_RADIUS
 const DELIVER_RADIUS_SQ = DELIVER_RADIUS * DELIVER_RADIUS
 // "getting close" band → HUD arrow glows hotter as you near the drop.
-const NEAR_RADIUS = 26
+const NEAR_RADIUS = 26 * WORLD_SCALE
 const NEAR_RADIUS_SQ = NEAR_RADIUS * NEAR_RADIUS
 
 // Confetti burst pool (single celebration at a time → one burst is plenty,
@@ -64,12 +65,12 @@ const CONFETTI_SLOTS = 2
 const CONFETTI_PER = 28
 const CONFETTI_TOTAL = CONFETTI_SLOTS * CONFETTI_PER
 const CONFETTI_LIFE = 1.0 // seconds
-const CONFETTI_SPEED = 13 // initial outward speed
-const CONFETTI_GRAVITY = 16 // pull back toward planet center
+const CONFETTI_SPEED = 13 * WORLD_SCALE // initial outward speed
+const CONFETTI_GRAVITY = 16 * WORLD_SCALE // pull back toward planet center
 const PARK_Y = -100000 // park dead particles far out of sight
 
 const SHOCK_LIFE = 0.6 // delivery shock-ring expansion time
-const SHOCK_MAX = 16 // shock-ring final radius scale
+const SHOCK_MAX = 16 * WORLD_SCALE // shock-ring final radius scale
 
 // Accent colors not in PAL, authored sRGB & color-managed exactly like PAL.
 const srgb = (hex: number) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace)

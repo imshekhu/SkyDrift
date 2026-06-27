@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { GameContext, GameSystem } from '../core/types'
 import { PAL } from '../art/palette'
 import { damp } from '../plane/flight'
+import { WORLD_SCALE } from '../world/WorldConfig'
 
 /**
  * QuestRace — a ring-gate time trial woven onto the planet.
@@ -70,12 +71,12 @@ const COL = {
 }
 
 const RING_COUNT = 8
-const RING_RADIUS = 7.5 // torus aperture radius (world units) — generous to fly through
-const RING_TUBE = 0.7
-const RING_ALT = 34 // base altitude of the ring path above the surface
-const START_ALT = 26
-const START_TRIGGER = 14 // proximity (world units) to arm the start
-const PASS_PAD = 1.5 // forgiveness added to aperture for a valid pass
+const RING_RADIUS = 7.5 * WORLD_SCALE // torus aperture radius (world units) — generous to fly through
+const RING_TUBE = 0.7 * WORLD_SCALE
+const RING_ALT = 34 * WORLD_SCALE // base altitude of the ring path above the surface
+const START_ALT = 26 * WORLD_SCALE
+const START_TRIGGER = 14 * WORLD_SCALE // proximity (world units) to arm the start
+const PASS_PAD = 1.5 * WORLD_SCALE // forgiveness added to aperture for a valid pass
 
 type Phase = 'idle' | 'countdown' | 'running' | 'finished'
 
@@ -140,11 +141,11 @@ export function createRaceSystem(): GameSystem {
   const buildChevrons = (): THREE.BufferGeometry => {
     // three nested ">" chevrons; drawn as thin filled arrowheads
     const verts: number[] = []
-    const w = 1.7 // half-width of a chevron
-    const th = 0.55 // thickness
-    const tip = 1.0 // how far the point leads the wings
+    const w = 1.7 * WORLD_SCALE // half-width of a chevron
+    const th = 0.55 * WORLD_SCALE // thickness
+    const tip = 1.0 * WORLD_SCALE // how far the point leads the wings
     for (let k = 0; k < 3; k++) {
-      const z = k * 1.5 - 1.5 // stack them along the fly-through axis
+      const z = (k * 1.5 - 1.5) * WORLD_SCALE // stack them along the fly-through axis
       // each chevron = two slim quads forming a "v" rotated to point +Z(screen via group)
       // we lay them in local XY; the group orients XY into the ring plane.
       // upper arm
@@ -277,7 +278,7 @@ export function createRaceSystem(): GameSystem {
       _ringNormal.addScaledVector(axis, wobble).normalize()
 
       const g = gates[i]
-      const alt = RING_ALT + Math.sin(ang * 3) * 6
+      const alt = RING_ALT + Math.sin(ang * 3) * 6 * WORLD_SCALE
       g.center.copy(ctx.planet.surfacePoint(_ringNormal, alt))
     }
 
@@ -297,7 +298,7 @@ export function createRaceSystem(): GameSystem {
       // overshoots into the next ring). It lives in local space, where +Z is
       // the fly-through direction; we orient/scale the beam mesh locally.
       const span = Math.min(g.beamLen * 0.7, RING_RADIUS * 2.4)
-      g.beam.scale.set(1.4, span, 1)
+      g.beam.scale.set(1.4 * WORLD_SCALE, span, 1)
       g.beam.position.set(0, 0, span * 0.5 + RING_RADIUS * 0.2)
       g.beam.rotation.set(-Math.PI / 2, 0, 0) // PlaneGeometry(1,1) in XY -> lay along local Z
     }
@@ -677,8 +678,8 @@ export function createRaceSystem(): GameSystem {
 
       // shared geometries (0 = torus, 1 = halo ring, 2 = start torus, 3 = chevrons, 4 = beam)
       geometries.push(new THREE.TorusGeometry(RING_RADIUS, RING_TUBE, 8, 24)) // 0
-      geometries.push(new THREE.RingGeometry(RING_RADIUS - 0.4, RING_RADIUS + 1.8, 28)) // 1
-      geometries.push(new THREE.TorusGeometry(RING_RADIUS + 1, RING_TUBE * 1.4, 8, 24)) // 2
+      geometries.push(new THREE.RingGeometry(RING_RADIUS - 0.4 * WORLD_SCALE, RING_RADIUS + 1.8 * WORLD_SCALE, 28)) // 1
+      geometries.push(new THREE.TorusGeometry(RING_RADIUS + 1 * WORLD_SCALE, RING_TUBE * 1.4, 8, 24)) // 2
       geometries.push(buildChevrons()) // 3
       geometries.push(new THREE.PlaneGeometry(1, 1)) // 4 (unit, scaled per gate)
 
@@ -835,7 +836,7 @@ export function createRaceSystem(): GameSystem {
           g.chevMat.opacity = g.pulse * (0.45 + 0.35 * beat)
           g.chevrons.rotation.z += dt * 0.9
           // gentle forward "draw" toward the player to read as "go this way"
-          g.chevrons.position.z = -1.2 + 0.8 * (0.5 + 0.5 * Math.sin(now * 3))
+          g.chevrons.position.z = (-1.2 + 0.8 * (0.5 + 0.5 * Math.sin(now * 3))) * WORLD_SCALE
         } else if (g.chevrons.visible) {
           g.chevrons.visible = false
         }

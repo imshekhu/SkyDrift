@@ -5,6 +5,10 @@ import type { Flight } from '../plane/flight'
 /** The planet every system spawns things on. Smooth sphere has heightAt()=0. */
 export interface Planet {
   radius: number
+  /** world-scale factor = radius / AUTHORED_RADIUS(100); multiply authored lengths by this */
+  scale: number
+  /** max terrain displacement above base radius, in world units (= RELIEF · radius) */
+  relief: number
   mesh: THREE.Mesh
   /** terrain height above base radius at a unit surface direction (0 for a smooth sphere) */
   heightAt(dir: THREE.Vector3): number
@@ -19,6 +23,46 @@ export interface Player {
   readonly boosting: boolean
 }
 
+// ── Regions: the planet is partitioned into named biome regions (spherical
+// Voronoi by capital direction). Built in world/regions.ts; published at
+// (ctx as any).regions by the Regions system. (World plan §3.)
+export type BiomeKind =
+  | 'forest' | 'meadow' | 'jungle' | 'savanna' | 'steppe'
+  | 'desert' | 'mesa' | 'badlands'
+  | 'snow' | 'tundra' | 'alpine' | 'volcano'
+  | 'ocean' | 'archipelago' | 'lake' | 'hub'
+
+export interface RegionDef {
+  id: string
+  name: string
+  /** unit surface direction of the region's centre (assigned at build) */
+  capital: THREE.Vector3
+  biome: BiomeKind
+  /** colour the surface is blended toward inside the region (gives each a hue) */
+  tint: THREE.Color
+  /** 0..1 how strongly the tint shows at the region core */
+  tintAmount: number
+  /** -1..1 nudge to mean land height (× planet relief) — desert flat, alpine tall */
+  elevationBias: number
+  /** angular radius (radians) of this region's live disc for streaming (P3) */
+  streamRadius: number
+  /** soft cap of tasks this region can host (future task registry) */
+  taskSlots: number
+}
+
+export interface RegionsApi {
+  defs: RegionDef[]
+  /** the region containing a unit surface direction (nearest capital) */
+  regionAt(dir: THREE.Vector3): RegionDef
+  /** the region the player is currently in */
+  current: RegionDef
+  /** current + streamed-in neighbours (P3); for now == [current] */
+  liveSet: RegionDef[]
+  isLive(id: string): boolean
+  /** subscribe to region-entry; returns an unsubscribe fn */
+  onEnter(cb: (r: RegionDef) => void): () => void
+}
+
 export type EventName =
   | 'collect'
   | 'levelup'
@@ -29,6 +73,7 @@ export type EventName =
   | 'questComplete'
   | 'vehicleUnlock'
   | 'enterWorld'
+  | 'enterRegion'
   | 'fire'
 
 export interface EventBus {
@@ -40,6 +85,8 @@ export interface AudioBus {
   play(name: string, opts?: { volume?: number; rate?: number }): void
   /** drive a continuous engine sound from normalized speed [0..1] */
   setEngine?(speed01: number): void
+  /** drive the sustained storm-rain bed from normalized intensity [0..1] */
+  setStorm?(intensity01: number): void
   unlock?(): void
 }
 

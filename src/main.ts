@@ -3,6 +3,7 @@ import { PAL } from './art/palette'
 import { input, initKeyboard, pollKeyboard } from './controls/input'
 import { Flight, PLANET_RADIUS, TUNING } from './plane/flight'
 import { updateChaseCamera } from './plane/camera'
+import { CAMERA_FAR, WORLD_SCALE } from './world/WorldConfig'
 
 import type { GameContext, Player } from './core/types'
 import { Game } from './core/Game'
@@ -10,12 +11,14 @@ import { createEventBus } from './core/EventBus'
 import { createHudBus } from './core/HudBus'
 
 import { buildPlanet, createPlanetWaterSystem } from './world/Planet'
+import { assignRegions } from './world/regions'
 import { createComposer } from './post/Composer'
 
 // --- Systems (registration order matters — see the game.add() block below) ---
 import { createLightingSystem } from './systems/Lighting'
 import { createSkySystem } from './systems/Sky'
 import { createCelestialSystem } from './systems/Celestial'
+import { createRegionSystem } from './systems/Regions'
 import { createWeatherSystem } from './systems/Weather'
 import { createSkyExtrasSystem } from './systems/SkyExtras'
 import { createScenerySystem } from './systems/Scenery'
@@ -26,6 +29,7 @@ import { createBoostSystem } from './systems/Boost'
 import { createCollectiblesSystem } from './systems/Collectibles'
 import { createVehiclesSystem } from './systems/Vehicles'
 import { createPaintballSystem } from './systems/Paintball'
+import { WeaponSystem } from './systems/Combat'
 import { createTrailsSystem } from './systems/Trails'
 import { createPackageQuestSystem } from './systems/QuestPackage'
 import { createSelfieQuestSystem } from './systems/QuestSelfie'
@@ -65,16 +69,16 @@ renderer.toneMappingExposure = 1.0
 const scene = new THREE.Scene()
 // Sky.ts adopts (and then owns) this fog if present; we seed it so the very first
 // frame — before Sky.init() runs — already clears to the horizon colour (no pop).
-scene.fog = new THREE.Fog(PAL.skyHorizon, 220, 650)
+scene.fog = new THREE.Fog(PAL.skyHorizon, 220 * WORLD_SCALE, 650 * WORLD_SCALE)
 renderer.setClearColor(PAL.skyHorizon, 1)
 
 const camera = new THREE.PerspectiveCamera(
   TUNING.CAM_FOV_BASE,
   window.innerWidth / window.innerHeight,
   0.5,
-  1400 // keep >= ~1250 so Sky/Portals domes (R≈1180–1200) never clip
+  CAMERA_FAR // keep > Sky/Portals dome radius (both derived from world size in WorldConfig)
 )
-camera.position.set(-16, PLANET_RADIUS + 24, 0)
+camera.position.set(-16, PLANET_RADIUS + 24 * WORLD_SCALE, 0)
 
 // --- Post-processing composer ------------------------------------------------
 // Global grade + high-threshold bloom + vignette, drawn instead of a raw
@@ -101,7 +105,11 @@ function rand(): number {
 // buildPlanet() is NOT a GameSystem — it builds ctx.planet once. Its mesh is a
 // Group (land + water) cast to THREE.Mesh per the Planet contract; we only ever
 // scene.add() it, so the cast is safe.
-const planet = buildPlanet(PLANET_RADIUS, rand)
+// Assign 16 biome-region capitals from the seed BEFORE the planet so the planet
+// can colour + raise terrain per region, and the Regions system queries the same
+// capitals (one seeded source of truth — keeps colours and runtime queries in sync).
+const regions = assignRegions(rand)
+const planet = buildPlanet(PLANET_RADIUS, rand, regions)
 scene.add(planet.mesh)
 
 // --- Player -----------------------------------------------------------------
@@ -179,6 +187,8 @@ anyCtx.npcTargets = []
 anyCtx.score = 0
 // weather — Weather owns/publishes; sky-extras read raining/rainIntensity01/rainbow.
 anyCtx.weather = { raining: false, rainIntensity01: 0, rainbow: false }
+// rainPass — the windshield-rain post pass; Weather drives uIntensity/uSpeed each frame.
+anyCtx.rainPass = composer.rainPass
 
 // --- Game + system registration ---------------------------------------------
 // Order: planet-water/lighting/sky/celestial first (backdrop + the light rig the
@@ -195,6 +205,9 @@ game.add(
   createWeatherSystem(), // rain overlay + schedule; publishes (ctx as any).weather
   createSkyExtrasSystem(), // moon + rainbow; reads (ctx as any).sky and .weather
 
+  // ── regions: publishes (ctx as any).regions; fires 'enterRegion' on crossing ──
+  createRegionSystem(regions),
+
   // ── static world & living world ──
   createScenerySystem(), // trees / rocks / bushes across the globe
   createLandmarksSystem(), // 6 landmarks; publishes (ctx as any).landmarks
@@ -209,6 +222,7 @@ game.add(
   createCollectiblesSystem(),
   createVehiclesSystem(), // parents biplane/carpet under ctx.player.obj (planeObj)
   createPaintballSystem(),
+  new WeaponSystem(), // Spacebar → pooled glowing projectiles (combat)
   createTrailsSystem(), // reads boostActive (published above)
 
   // ── quests ──

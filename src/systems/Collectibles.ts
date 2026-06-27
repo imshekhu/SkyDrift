@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { GameContext, GameSystem } from '../core/types'
 import { PAL } from '../art/palette'
 import { damp } from '../plane/flight'
+import { WORLD_SCALE } from '../world/WorldConfig'
 
 /**
  * Collectibles — the bread-and-butter XP pickups that float just above the
@@ -39,12 +40,12 @@ import { damp } from '../plane/flight'
 // ----- tuning ---------------------------------------------------------------
 
 const ALIVE_COUNT = 60 // steady population across the whole planet
-const DEFAULT_MAGNET_RANGE = 6 // world units; overridden by upgrades.magnet
-const COLLECT_RADIUS = 2.2 // pick-up proximity (world units)
+const DEFAULT_MAGNET_RANGE = 6 * WORLD_SCALE // world units; overridden by upgrades.magnet
+const COLLECT_RADIUS = 2.2 * WORLD_SCALE // pick-up proximity (world units)
 const MAGNET_PULL_K = 6.0 // damp() stiffness once the magnet is fully awake
 const MAGNET_WAKE_TIME = 0.16 // seconds of ease-in before full pull (anticipation)
-const SPAWN_MIN_ALT = 9 // float height band above the surface …
-const SPAWN_MAX_ALT = 26 // … so items sit in comfortable flight altitudes
+const SPAWN_MIN_ALT = 9 * WORLD_SCALE // float height band above the surface …
+const SPAWN_MAX_ALT = 26 * WORLD_SCALE // … so items sit in comfortable flight altitudes
 const BOB_AMPLITUDE = 0.6 // vertical bob (along surface normal)
 const SPIN_RATE = 1.1 // rad/s base spin about the local up
 
@@ -62,14 +63,14 @@ const CLUSTER_MAX = 5
 const BURST_POOL = 8 // simultaneous bursts (plenty at 60fps)
 const BURST_PARTICLES = 12 // points per burst
 const BURST_LIFETIME = 0.6 // seconds
-const BURST_SPEED = 9 // initial outward speed
-const BURST_GRAVITY = 14 // pull back toward the planet center
+const BURST_SPEED = 9 * WORLD_SCALE // initial outward speed
+const BURST_GRAVITY = 14 * WORLD_SCALE // pull back toward the planet center
 
 // Sparkle-ring shockwave pool (a flat expanding ring at each pickup).
 const SRING_POOL = 6 // simultaneous shockwaves
 const SRING_LIFETIME = 0.42 // seconds
 const SRING_START = 0.4 // starting radius scale
-const SRING_END = 4.2 // ending radius scale
+const SRING_END = 4.2 * WORLD_SCALE // ending radius scale
 
 // Squared thresholds (no sqrt in the hot loop).
 const COLLECT_RADIUS_SQ = COLLECT_RADIUS * COLLECT_RADIUS
@@ -365,7 +366,7 @@ export function createCollectiblesSystem(): GameSystem {
         materials.push(m)
         geoForKind.set('box', g)
         matForKind.set('box', m)
-        SCALE_FOR.box = 1
+        SCALE_FOR.box = 1 * WORLD_SCALE
       }
 
       // DIAMOND — octahedron with a holo cyan glint (emissive so it sparkles
@@ -384,7 +385,7 @@ export function createCollectiblesSystem(): GameSystem {
         materials.push(m)
         geoForKind.set('diamond', g)
         matForKind.set('diamond', m)
-        SCALE_FOR.diamond = 1
+        SCALE_FOR.diamond = 1 * WORLD_SCALE
       }
 
       // LANTERN — squat cylinder body; warm self-lit glow that breathes.
@@ -402,7 +403,7 @@ export function createCollectiblesSystem(): GameSystem {
         materials.push(m)
         geoForKind.set('lantern', g)
         matForKind.set('lantern', m)
-        SCALE_FOR.lantern = 1
+        SCALE_FOR.lantern = 1 * WORLD_SCALE
       }
 
       // RING — torus you fly through; cool gem-cyan, lightly self-lit so the
@@ -421,7 +422,7 @@ export function createCollectiblesSystem(): GameSystem {
         materials.push(m)
         geoForKind.set('ring', g)
         matForKind.set('ring', m)
-        SCALE_FOR.ring = 1
+        SCALE_FOR.ring = 1 * WORLD_SCALE
       }
 
       // ---------------------------------------------------------------

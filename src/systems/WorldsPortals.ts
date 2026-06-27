@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { GameContext, GameSystem } from '../core/types'
 import { PAL } from '../art/palette'
 import { damp } from '../plane/flight'
+import { DOME_RADIUS, WORLD_SCALE } from '../world/WorldConfig'
 
 /**
  * WorldsPortals — a glowing swirling ring PORTAL on the planet that, when you
@@ -37,15 +38,15 @@ import { damp } from '../plane/flight'
  */
 
 // ---- Tunables --------------------------------------------------------------
-const RING_INNER = 6 // torus tube hole radius (the "doorway")
-const RING_TUBE = 1.2 // torus tube thickness
-const RING_ALT = RING_INNER + 2 // lift centre so the doorway clears the ground
+const RING_INNER = 6 * WORLD_SCALE // torus tube hole radius (the "doorway")
+const RING_TUBE = 1.2 * WORLD_SCALE // torus tube thickness
+const RING_ALT = RING_INNER + 2 * WORLD_SCALE // lift centre so the doorway clears the ground
 const PASS_RADIUS = RING_INNER + RING_TUBE // how close to centre counts as "through"
 const FADE_SECONDS = 0.5 // half of a there-and-back fade
 const STAR_COUNT = 1100 // additive points (cheap)
-const DOME_RADIUS = 1180 // < camera far (1400); recentred on camera each frame
+// DOME_RADIUS imported from WorldConfig (shared with Sky; derived from world size).
 const MOTE_COUNT = 14 // orbiting energy motes per portal (one InstancedMesh)
-const ARM_RANGE = 46 // distance at which a portal starts to "charge"
+const ARM_RANGE = 46 * WORLD_SCALE // distance at which a portal starts to "charge"
 const ARM_RANGE2 = ARM_RANGE * ARM_RANGE
 
 // Cosmic palette derived from PAL so it still feels part of this world.
@@ -264,7 +265,7 @@ export function createPortalsSystem(): GameSystem {
 
     // Orbiting energy motes around the doorway — ONE InstancedMesh, animated in
     // update() with zero allocation. They sit in the doorway plane (right/up).
-    const moteGeo = new THREE.TetrahedronGeometry(0.34, 0)
+    const moteGeo = new THREE.TetrahedronGeometry(0.34 * WORLD_SCALE, 0)
     const moteMat = new THREE.MeshStandardMaterial({
       color: PAL.gem.clone(),
       emissive: PAL.gem.clone().multiplyScalar(0.9),
@@ -299,7 +300,7 @@ export function createPortalsSystem(): GameSystem {
     group.add(halo)
 
     // A couple of low-poly gem studs at the base for charm.
-    const studGeo = new THREE.OctahedronGeometry(0.8, 0)
+    const studGeo = new THREE.OctahedronGeometry(0.8 * WORLD_SCALE, 0)
     const studMat = new THREE.MeshStandardMaterial({
       color: PAL.gem.clone(),
       emissive: PAL.gem.clone().multiplyScalar(0.3),
@@ -309,7 +310,7 @@ export function createPortalsSystem(): GameSystem {
     for (let s = 0; s < 2; s++) {
       const stud = new THREE.Mesh(studGeo, studMat)
       const side = s === 0 ? 1 : -1
-      stud.position.copy(ringRight).multiplyScalar(side * (RING_INNER + 0.6))
+      stud.position.copy(ringRight).multiplyScalar(side * (RING_INNER + 0.6 * WORLD_SCALE))
       stud.frustumCulled = true
       group.add(stud)
     }
@@ -616,7 +617,7 @@ export function createPortalsSystem(): GameSystem {
 
         // orbiting motes — ONE InstancedMesh, zero allocation
         const motes = p.motes
-        const orbitR = RING_INNER + 0.4 + Math.sin(t * 1.5) * 0.25
+        const orbitR = RING_INNER + (0.4 + Math.sin(t * 1.5) * 0.25) * WORLD_SCALE
         const baseSpin = t * (0.9 + p.charge * 1.6)
         for (let m = 0; m < MOTE_COUNT; m++) {
           const ang = baseSpin + (m / MOTE_COUNT) * TWO_PI
@@ -628,7 +629,7 @@ export function createPortalsSystem(): GameSystem {
             .multiplyScalar(ca * orbitR)
             .addScaledVector(p.upAxis, sa * orbitR)
           // small in/out bob along the doorway normal so they weave through the ring
-          _motePos.addScaledVector(p.normal, Math.sin(ang * 2.0 + t * 2.2) * 0.6)
+          _motePos.addScaledVector(p.normal, Math.sin(ang * 2.0 + t * 2.2) * 0.6 * WORLD_SCALE)
           const sc = 0.6 + 0.5 * (0.5 + 0.5 * Math.sin(t * 3.0 + m))
           _moteScale.setScalar(sc * (0.8 + p.charge * 0.6))
           _moteQuat.setFromAxisAngle(p.normal, ang * 1.7)

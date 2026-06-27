@@ -1,7 +1,9 @@
 import * as THREE from 'three'
+import { alignToSurface } from '../world/surface'
 import type { GameContext, GameSystem } from '../core/types'
 import { PAL } from '../art/palette'
 import { damp } from '../plane/flight'
+import { WORLD_SCALE } from '../world/WorldConfig'
 
 /**
  * Landmarks — ~6 distinctive, hand-built low-poly structures dotted around the
@@ -149,14 +151,9 @@ export function createLandmarksSystem(): GameSystem {
   // Orient a child so its local +Y points "outward" (radially up at the base),
   // i.e. it stands on the surface like a building. dir is a unit surface normal.
   const standOn = (o: THREE.Object3D, dir: THREE.Vector3) => {
-    _up.copy(dir)
-    // stable tangent basis (avoid degeneracy when up ~ +Y)
-    const ref = Math.abs(_up.dot(_refA)) > 0.95 ? _refB : _refA
-    _tangent.copy(ref)
-    _tangent.addScaledVector(_up, -_tangent.dot(_up)).normalize()
-    _bitangent.crossVectors(_up, _tangent).normalize()
-    _basis.makeBasis(_tangent, _up, _bitangent)
-    o.quaternion.setFromRotationMatrix(_basis)
+    // local +Y → the surface normal (radial-up here) via the shared
+    // setFromUnitVectors() form, so every building/prop aligns identically.
+    alignToSurface(o, dir)
   }
 
   // tiny lantern helper: a warm glowing cube on a string, used for charm.
@@ -616,12 +613,12 @@ export function createLandmarksSystem(): GameSystem {
     build: () => THREE.Group
     radius: number
   }> = [
-    { id: 'lighthouse', name: 'Lighthouse', label: 'Old Lighthouse', build: buildLighthouse, radius: 26 },
-    { id: 'pagoda', name: 'Pagoda', label: 'Sky Pagoda', build: buildPagoda, radius: 24 },
-    { id: 'giant-tree', name: 'Giant Tree', label: 'Elder Tree', build: buildGiantTree, radius: 26 },
-    { id: 'statue', name: 'Statue', label: 'The Guardian', build: buildStatue, radius: 24 },
-    { id: 'arch', name: 'Arch', label: 'Traveler’s Arch', build: buildArch, radius: 24 },
-    { id: 'windmill', name: 'Windmill', label: 'Breeze Mill', build: buildWindmill, radius: 24 },
+    { id: 'lighthouse', name: 'Lighthouse', label: 'Old Lighthouse', build: buildLighthouse, radius: 26 * WORLD_SCALE },
+    { id: 'pagoda', name: 'Pagoda', label: 'Sky Pagoda', build: buildPagoda, radius: 24 * WORLD_SCALE },
+    { id: 'giant-tree', name: 'Giant Tree', label: 'Elder Tree', build: buildGiantTree, radius: 26 * WORLD_SCALE },
+    { id: 'statue', name: 'Statue', label: 'The Guardian', build: buildStatue, radius: 24 * WORLD_SCALE },
+    { id: 'arch', name: 'Arch', label: 'Traveler’s Arch', build: buildArch, radius: 24 * WORLD_SCALE },
+    { id: 'windmill', name: 'Windmill', label: 'Breeze Mill', build: buildWindmill, radius: 24 * WORLD_SCALE },
   ]
 
   // deterministic spread of unit directions over the sphere using the seeded RNG.
@@ -668,6 +665,8 @@ export function createLandmarksSystem(): GameSystem {
         const basePos = ctx.planet.surfacePoint(chosen, 0)
         node.position.copy(basePos)
         standOn(node, chosen)
+        // scale the whole structure up so it isn't tiny on the huge planet
+        node.scale.setScalar(WORLD_SCALE)
         group.add(node)
 
         // proximity halo: placed at the base, oriented like the structure

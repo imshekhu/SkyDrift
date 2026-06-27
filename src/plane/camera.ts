@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { TUNING, damp } from './flight'
+import { TUNING, damp, PLANET_RADIUS } from './flight'
 
 // Module-scoped temps — zero per-frame allocation.
 // Track last projected FOV so we only call updateProjectionMatrix when it changes.
@@ -31,6 +31,9 @@ export function updateChaseCamera(
   _lookAt.copy(plane.position).addScaledVector(_fwd, TUNING.CAM_LOOKAHEAD)
 
   _radialUp.copy(plane.position).normalize()
+  // Drop the look-target below the horizon (∝ altitude) so the chase view frames
+  // the world below rather than mostly sky — the huge planet cruises high up.
+  _lookAt.addScaledVector(_radialUp, -(plane.position.length() - PLANET_RADIUS) * TUNING.CAM_LOOK_DOWN)
   _planeUp.set(0, 1, 0).applyQuaternion(plane.quaternion)
   _up.copy(_radialUp).lerp(_planeUp, 0.35).normalize()
 

@@ -741,7 +741,7 @@ export function createHudSystem(): GameSystem {
         'max-width:46vw',
       ].join(';')
       hint.innerHTML =
-        '<b>W/S</b> pitch &nbsp; <b>A/D</b> bank &nbsp; <b>Shift</b> boost &nbsp; <b>Space</b> roll'
+        '<b>W/S</b> throttle &nbsp; <b>A/D</b> bank &nbsp; <b>↑</b> climb &nbsp; <b>Space</b> fire'
       el.appendChild(hint)
       hints = hint
       hintsTimer = 0

@@ -37,10 +37,10 @@ function mergeFlat(list: THREE.BufferGeometry[]): THREE.BufferGeometry | null {
  */
 
 // Per-family instance budgets (mobile-conscious; 1 draw call each).
-const PINE_COUNT = 720
-const ROUND_COUNT = 560
+const PINE_COUNT = 1500
+const ROUND_COUNT = 1150
 const PALM_COUNT = 200
-const BUSH_COUNT = 620
+const BUSH_COUNT = 820
 const FLOWER_COUNT = 900
 const MUSHROOM_COUNT = 260
 const ROCK_COUNT = 720
@@ -284,7 +284,9 @@ export function createScenerySystem(): GameSystem {
       const onMeadow = (t: number) => t >= GRASS_LO && t <= GRASS_HI * 0.75
 
       // ── cluster seed sets (shared so families co-locate believably) ───────
-      const forests = makeClusters(34, 0.05, 0.12, onForest)
+      // Forests: ~1.4× more seeds and tighter spread so canopies overlap into
+      // continuous woods (denser per-cluster) rather than scattered dots.
+      const forests = makeClusters(48, 0.045, 0.1, onForest)
       const meadows = makeClusters(22, 0.04, 0.1, onMeadow)
       const beaches = makeClusters(16, 0.03, 0.07, onBeach)
       const boulders = makeClusters(20, 0.04, 0.1, onRocky)
@@ -508,8 +510,10 @@ export function createScenerySystem(): GameSystem {
       const t = ctx.elapsed()
       // global gust envelope (shared) keeps families coherent
       const gust = 0.65 + 0.35 * Math.sin(t * 0.5)
-      // per-call budget split across all swaying families (keeps the cost flat)
-      const BUDGET = 220
+      // per-call budget split across all swaying families (keeps the cost flat).
+      // Bumped modestly to match the larger tree counts so every instance still
+      // cycles through its sway over a few frames (we never sway all at once).
+      const BUDGET = 360
       const each = Math.max(8, (BUDGET / swayers.length) | 0)
 
       for (const s of swayers) {

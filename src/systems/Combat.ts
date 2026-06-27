@@ -87,7 +87,7 @@ export class WeaponSystem implements GameSystem {
   init(ctx: GameContext): void {
     // Elongated octahedron: radius across, stretched along +Z → a glowing dart.
     const geo = new THREE.OctahedronGeometry(BOLT_RADIUS, 0)
-    geo.scale(1, 1, BOLT_STRETCH)
+    geo.scale(0.4, 0.4, BOLT_STRETCH * 0.7) // a SMALL dart core; the glow does the lighting
     this.geometry = geo
 
     // Self-lit, tone-mapping bypassed so the >1.0 colour survives to bloom.
@@ -115,8 +115,8 @@ export class WeaponSystem implements GameSystem {
 
     // Ethereal glow trail — soft drifting motes instead of a flat streak.
     this.trail = new GlowParticles({
-      count: 360,
-      size: BOLT_RADIUS * 2.0,
+      count: 420,
+      size: BOLT_RADIUS * 4.0,
       drag: 1.2,
       blending: THREE.AdditiveBlending,
       renderOrder: 3,
@@ -249,12 +249,14 @@ export class WeaponSystem implements GameSystem {
 
       // glowing dust in the bolt's wake — soft HDR motes that bloom + drift
       if (this.trail) {
-        const j = BOLT_RADIUS * 2.4
+        const j = BOLT_RADIUS * 1.4
+        // big, bright, overlapping soft motes → the bolt reads as a SPREADING orb
+        // of light with a fading wake, not a hard square.
         this.trail.emit(
           _pos.x, _pos.y, _pos.z,
           (ctx.rand() - 0.5) * j, (ctx.rand() - 0.5) * j, (ctx.rand() - 0.5) * j,
-          0.38, BOLT_RADIUS * 2.0,
-          0.5, 1.7, 2.3
+          0.3, BOLT_RADIUS * 4.0,
+          0.6, 2.0, 2.6
         )
       }
 

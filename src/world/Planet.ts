@@ -56,7 +56,7 @@ const BIOME = {
   rock: sc(0x9a8f86),
   rockDark: sc(0x7d756e), // shaded rock for craggy high slopes
   snow: sc(0xf4f0f7),
-  river: sc(0x6fa8d8), // inland freshwater — a touch greener/softer than ocean
+  river: sc(0x3fb8f0), // inland freshwater — bright, saturated blue-cyan so waterways read clearly vs land
 }
 
 // Elevation thresholds in NORMALIZED elevation space e∈[0,1] (0 = deepest, 1 = peak).
@@ -120,8 +120,9 @@ export function buildPlanet(radius: number, rand: () => number, regions?: Region
     if (eNorm <= SHORE + 0.01 || eNorm > FOREST_TOP) return 0
     const rf = NOISE_FREQ * 1.1
     const v = noiseWarp(x * rf + 41.0, y * rf - 17.0, z * rf + 5.0)
-    // Narrow ridge where |v| is small → sinuous waterways.
-    const channel = 1 - Math.min(1, Math.abs(v) / 0.08)
+    // Ridge where |v| is small → sinuous waterways. Widened threshold so rivers
+    // read as broad blue channels (with tributaries) rather than hairlines.
+    const channel = 1 - Math.min(1, Math.abs(v) / 0.16)
     if (channel <= 0) return 0
     // Fade rivers out as land climbs toward forest (they pool in lowlands).
     const lowland = clamp01((FOREST_TOP - eNorm) / (FOREST_TOP - SHORE))
@@ -194,7 +195,7 @@ export function buildPlanet(radius: number, rand: () => number, regions?: Region
     // through the translucent water; land follows terrain. River basins dip a
     // hair below their surroundings (cosmetic only — heightAt() ignores this).
     let h = eWorld < SEA_LEVEL ? -WATER_INSET * radius : eWorld
-    if (river > 0) h -= river * RELIEF * radius * 0.06
+    if (river > 0) h -= river * RELIEF * radius * 0.12
     const r = radius + h
     pos.setXYZ(i, dir.x * r, dir.y * r, dir.z * r)
 
@@ -355,9 +356,11 @@ function biomeColor(
     }
   }
 
-  // Inland freshwater: carved rivers/lakes paint over land as soft blue.
+  // Inland freshwater: carved rivers/lakes paint over land as bright blue.
+  // Boost the mask before smoothing so strong-mask vertices lerp to (near-)full
+  // river colour — the channel core reads as solid water, banks fade to land.
   if (river > 0) {
-    out.lerp(scratch.copy(BIOME.river), smooth(clamp01(river)))
+    out.lerp(scratch.copy(BIOME.river), smooth(clamp01(river * 1.6)))
   }
 }
 

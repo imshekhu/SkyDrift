@@ -41,12 +41,14 @@ const url = (id: string): string => `${BASE_URL}monuments/${id}.glb`
 
 // The registry. targetHeight is in AUTHORED units (multiply by WORLD_SCALE later).
 const MONUMENTS: MonumentDef[] = [
-  { id: 'eiffel-tower', name: 'Eiffel Tower', url: url('eiffel-tower'), targetHeight: 60, biome: 'meadow' },
-  { id: 'taj-mahal', name: 'Taj Mahal', url: url('taj-mahal'), targetHeight: 38, biome: 'savanna' },
-  { id: 'chichen-itza', name: 'Chichén Itzá', url: url('chichen-itza'), targetHeight: 30, biome: 'jungle' },
-  { id: 'great-pyramids', name: 'Great Pyramids', url: url('great-pyramids'), targetHeight: 45, biome: 'desert' },
-  { id: 'big-ben', name: 'Big Ben', url: url('big-ben'), targetHeight: 50, biome: 'forest' },
-  { id: 'obelisk', name: 'The Obelisk', url: url('obelisk'), targetHeight: 42, biome: 'mesa' },
+  // MINIATURE wonders — authored × WORLD_SCALE(6.4) → ~26–58 world units (a touch
+  // above the biplane) so they read as charming little landmarks, not skyscrapers.
+  { id: 'eiffel-tower', name: 'Eiffel Tower', url: url('eiffel-tower'), targetHeight: 9, biome: 'meadow' },
+  { id: 'taj-mahal', name: 'Taj Mahal', url: url('taj-mahal'), targetHeight: 5, biome: 'savanna' },
+  { id: 'chichen-itza', name: 'Chichén Itzá', url: url('chichen-itza'), targetHeight: 4, biome: 'jungle' },
+  { id: 'great-pyramids', name: 'Great Pyramids', url: url('great-pyramids'), targetHeight: 6, biome: 'desert' },
+  { id: 'big-ben', name: 'Big Ben', url: url('big-ben'), targetHeight: 7, biome: 'forest' },
+  { id: 'obelisk', name: 'The Obelisk', url: url('obelisk'), targetHeight: 5, biome: 'mesa' },
 ]
 
 // One shared loader for the whole system.

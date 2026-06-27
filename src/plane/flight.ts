@@ -17,13 +17,16 @@ export const TUNING = {
   THROTTLE_RATE: 0.6, // throttle-lever units per second under full W/S
   BOOST_THROTTLE: 0.72, // throttle above this reads as "boosting" (camera FOV + boost FX)
   SPEED_LERP: 3,
+  // Physical ground speed = this × the displayed speed. < 1 slows the plane down
+  // WITHOUT changing the SPD readout (the HUD reads `speed`; only motion is scaled).
+  MOVE_SPEED_SCALE: 0.5,
 
   PITCH_RATE: 1.6,
   YAW_RATE: 0.9,
   ROLL_RATE: 2.8,
   INPUT_SMOOTH: 8.0,
 
-  BANK_TO_YAW: 1.15, // banking carves the turn (key to the arcade feel)
+  BANK_TO_YAW: 0.69, // banking carves the turn (60% of the old 1.15 — gentler steering)
   AUTO_LEVEL: 0.8, // recenter wings when roll released
 
   MIN_ALTITUDE: 6 * S,
@@ -131,7 +134,8 @@ export class Flight {
     this.cruise(dt)
 
     _fwd.set(0, 0, 1).applyQuaternion(this.obj.quaternion)
-    this.obj.position.addScaledVector(_fwd, this.speed * dt)
+    // Motion is scaled (MOVE_SPEED_SCALE) but `speed` — what the HUD shows — is not.
+    this.obj.position.addScaledVector(_fwd, this.speed * TUNING.MOVE_SPEED_SCALE * dt)
 
     this.constrainAltitude(dt)
   }

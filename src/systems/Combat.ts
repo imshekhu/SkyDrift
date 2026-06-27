@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { GameContext, GameSystem } from '../core/types'
 import { WORLD_SCALE } from '../world/WorldConfig'
+import { GlowParticles } from '../art/particles'
 
 /**
  * Combat — the primary projectile weapon. Hold **Space** (`ctx.input.firing`)
@@ -80,6 +81,9 @@ export class WeaponSystem implements GameSystem {
   private next = 0 // round-robin spawn cursor
   private cooldown = 0 // seconds until the next shot is allowed
 
+  // soft glowing-dust trail left in each bolt's wake (THREE.Points, additive)
+  private trail: GlowParticles | null = null
+
   init(ctx: GameContext): void {
     // Elongated octahedron: radius across, stretched along +Z → a glowing dart.
     const geo = new THREE.OctahedronGeometry(BOLT_RADIUS, 0)
@@ -108,6 +112,16 @@ export class WeaponSystem implements GameSystem {
     mesh.instanceMatrix.needsUpdate = true
 
     ctx.scene.add(mesh)
+
+    // Ethereal glow trail — soft drifting motes instead of a flat streak.
+    this.trail = new GlowParticles({
+      count: 360,
+      size: BOLT_RADIUS * 2.0,
+      drag: 1.2,
+      blending: THREE.AdditiveBlending,
+      renderOrder: 3,
+    })
+    ctx.scene.add(this.trail.points)
   }
 
   /** Find a slot to fire from: a free one, else recycle the OLDEST live slot. */
@@ -233,6 +247,17 @@ export class WeaponSystem implements GameSystem {
       }
       this.life[s] = life
 
+      // glowing dust in the bolt's wake — soft HDR motes that bloom + drift
+      if (this.trail) {
+        const j = BOLT_RADIUS * 2.4
+        this.trail.emit(
+          _pos.x, _pos.y, _pos.z,
+          (ctx.rand() - 0.5) * j, (ctx.rand() - 0.5) * j, (ctx.rand() - 0.5) * j,
+          0.38, BOLT_RADIUS * 2.0,
+          0.5, 1.7, 2.3
+        )
+      }
+
       // orient the bolt to its velocity (+Z → normalized velocity) so it streaks
       _fwd.set(this.vel[p]!, this.vel[p + 1]!, this.vel[p + 2]!).normalize()
       _quat.setFromUnitVectors(_zAxis, _fwd)
@@ -242,9 +267,12 @@ export class WeaponSystem implements GameSystem {
     }
 
     if (dirty) mesh.instanceMatrix.needsUpdate = true
+    this.trail?.update(dt)
   }
 
   dispose(): void {
+    this.trail?.dispose()
+    this.trail = null
     if (this.mesh) {
       this.mesh.parent?.remove(this.mesh)
       this.mesh = null

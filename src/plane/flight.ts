@@ -29,11 +29,13 @@ export const TUNING = {
   MIN_ALTITUDE: 6 * S,
   MAX_ALTITUDE: 120 * S,
   CRUISE_ALTITUDE: 13 * S, // gentle target so the plane hugs the planet curvature
-  ALT_RETURN: 1.4, // (legacy; superseded by the critically-damped ALT_OMEGA spring below)
-  ALT_OMEGA: 2.2, // critically-damped (ζ=1) settle frequency (rad/s) — asymptotic, no overshoot
-  ALT_CLIMB_RATIO: 0.5, // hold-pitch climb/dive rate as a fraction of forward speed
-  ALT_PITCH_DEADZONE: 0.05, // |smoothed pitch| above this OVERRIDES the spring (free climb/dive)
-  ALT_OVERRIDE_K: 6, // damp() rate easing radialVel into the override target (smooth engage)
+  ALT_OMEGA: 1.8, // critically-damped (ζ=1) CLIMB-spring frequency (rad/s) — majestic, no overshoot
+  TERRAIN_TRACK_K: 8, // how tightly the plane hugs the terrain CONTOUR (low-pass rate; filters bumps)
+  // Altitude is TERRAIN-RELATIVE: low-passed terrain + a base clearance + the
+  // climb-spring offset. Clearance runs CRUISE → CLIMB (a smooth 3× range).
+  // (10/30 are authored radius-100 units; × WORLD_SCALE → terrain+64 → terrain+192 here.)
+  CRUISE_CLEARANCE: 10 * S, // baseline cruise: 10 units above the displaced terrain
+  CLIMB_CLEARANCE: 30 * S, // Arrow-Up ceiling: 30 units above terrain (3× expansion)
   FLOOR_CLEARANCE: 3 * S, // HARD floor = local terrain height + this (no clipping mountains)
   CEILING_ALTITUDE: 46 * S, // HARD ceiling above base radius (can't escape to space)
   GRAVITY: 9, // (legacy/unused — altitude uses the ALT_RETURN spring)
@@ -85,6 +87,10 @@ export class Flight {
   terrainHeightAt: ((dir: THREE.Vector3) => number) | null = null
   private sr = 0 // smoothed bank (roll) input
   private sc = 0 // smoothed climb input (Arrow Up)
+  // terrain-relative altitude state:
+  private smoothTerrain = NaN // low-passed terrain height we hug (snaps to terrain on frame 0)
+  private climbOffset = 0 // extra clearance from the climb spring (0 → CLIMB−CRUISE)
+  private climbVel = 0 // velocity of the majestic climb-offset spring
 
   constructor(obj: THREE.Object3D) {
     this.obj = obj
@@ -195,43 +201,44 @@ export class Flight {
   //                   which is unconditionally stable and never overshoots at any dt.
   private constrainAltitude(dt: number) {
     _radialUp.copy(this.obj.position).normalize() // direction AFTER the tangential advance
-    this.altitude = this.obj.position.length() - PLANET_RADIUS
+    const terrain = this.terrainHeightAt ? this.terrainHeightAt(_radialUp) : 0
 
-    if (this.sc > TUNING.ALT_PITCH_DEADZONE) {
-      // OVERRIDE — Arrow Up: the player owns altitude; the spring is suspended.
-      const targetVel = this.sc * this.speed * TUNING.ALT_CLIMB_RATIO
-      this.radialVel += (targetVel - this.radialVel) * damp(TUNING.ALT_OVERRIDE_K, dt)
-      this.altitude += this.radialVel * dt
-    } else {
-      // SETTLE — exact critically-damped return to CRUISE_ALTITUDE.
-      const w = TUNING.ALT_OMEGA
-      const e = Math.exp(-w * dt)
-      const d0 = this.altitude - TUNING.CRUISE_ALTITUDE
-      const B = this.radialVel + w * d0
-      this.altitude = TUNING.CRUISE_ALTITUDE + (d0 + B * dt) * e
-      this.radialVel = (this.radialVel - w * B * dt) * e
-      // snap the last hair to dead-still so there is literally zero residual jitter
-      if (Math.abs(this.altitude - TUNING.CRUISE_ALTITUDE) < 1e-3 && Math.abs(this.radialVel) < 1e-3) {
-        this.altitude = TUNING.CRUISE_ALTITUDE
-        this.radialVel = 0
-      }
+    // (1) TERRAIN FOLLOW — low-pass the terrain height so we hug the CONTOUR
+    // smoothly (high-frequency bumps filtered, the hills tracked). This keeps the
+    // baseline a clean 10 units over the ground WITHOUT jitter, even as the world
+    // rushes past at speed (a single spring tracking raw terrain would lag/judder).
+    if (Number.isNaN(this.smoothTerrain)) this.smoothTerrain = terrain // snap on frame 0
+    this.smoothTerrain += (terrain - this.smoothTerrain) * damp(TUNING.TERRAIN_TRACK_K, dt)
+
+    // (2) CLIMB OFFSET — a majestic, EXACT critically-damped (ζ=1) spring that
+    // expands the clearance from 0 (cruise) up to CLIMB−CRUISE (full climb) while
+    // Arrow Up is held, then glides asymptotically back to 0 on release.
+    //   d(t) = (d₀ + (v₀ + ω·d₀)·t)·e^(−ω·t)  → never overshoots, zero bounce.
+    const climbTarget = this.sc * (TUNING.CLIMB_CLEARANCE - TUNING.CRUISE_CLEARANCE)
+    const w = TUNING.ALT_OMEGA
+    const e = Math.exp(-w * dt)
+    const d0 = this.climbOffset - climbTarget
+    const B = this.climbVel + w * d0
+    this.climbOffset = climbTarget + (d0 + B * dt) * e
+    this.climbVel = (this.climbVel - w * B * dt) * e
+    if (Math.abs(d0) < 1e-3 && Math.abs(this.climbVel) < 1e-3) {
+      this.climbOffset = climbTarget
+      this.climbVel = 0
     }
 
-    // Re-seat at the owned altitude along the (tangentially-advanced) radial.
+    // altitude = smoothed terrain + base clearance (10) + majestic climb offset (→ 30)
+    this.altitude = this.smoothTerrain + TUNING.CRUISE_CLEARANCE + this.climbOffset
+    this.radialVel = this.climbVel // expose vertical rate (HUD climb/dive arrow)
     this.obj.position.copy(_radialUp).multiplyScalar(PLANET_RADIUS + this.altitude)
 
-    // --- HARD floor (follows local terrain) + HARD ceiling: cannot leave the band ---
-    const ground = this.terrainHeightAt ? this.terrainHeightAt(_radialUp) : 0
-    const floor = Math.max(ground + TUNING.FLOOR_CLEARANCE, TUNING.MIN_ALTITUDE)
-    const ceil = TUNING.CEILING_ALTITUDE
+    // --- HARD floor against the ACTUAL terrain (never clip a sudden peak) + ceiling ---
+    const floor = terrain + TUNING.FLOOR_CLEARANCE
     if (this.altitude < floor) {
       this.altitude = floor
-      if (this.radialVel < 0) this.radialVel = 0
       this.obj.position.copy(_radialUp).multiplyScalar(PLANET_RADIUS + floor)
-    } else if (this.altitude > ceil) {
-      this.altitude = ceil
-      if (this.radialVel > 0) this.radialVel = 0
-      this.obj.position.copy(_radialUp).multiplyScalar(PLANET_RADIUS + ceil)
+    } else if (this.altitude > TUNING.CEILING_ALTITUDE) {
+      this.altitude = TUNING.CEILING_ALTITUDE
+      this.obj.position.copy(_radialUp).multiplyScalar(PLANET_RADIUS + TUNING.CEILING_ALTITUDE)
     }
   }
 }

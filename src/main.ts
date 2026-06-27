@@ -23,6 +23,7 @@ import { createWeatherSystem } from './systems/Weather'
 import { createSkyExtrasSystem } from './systems/SkyExtras'
 import { createScenerySystem } from './systems/Scenery'
 import { createLandmarksSystem } from './systems/Landmarks'
+import { createMonumentSystem } from './systems/Monuments'
 import { createNpcLifeSystem } from './systems/NpcLife'
 import { createProgressionSystem } from './systems/Progression'
 import { createBoostSystem } from './systems/Boost'
@@ -211,6 +212,7 @@ game.add(
   // ── static world & living world ──
   createScenerySystem(), // trees / rocks / bushes across the globe
   createLandmarksSystem(), // 6 landmarks; publishes (ctx as any).landmarks
+  createMonumentSystem(), // world-wonder monuments (GLTF + procedural placeholders) per biome
   createNpcLifeSystem(), // birds/fish/boats/capys + NPC planes → (ctx as any).npcTargets
 
   // ── progression first so upgrades/progress exist for the systems that read them ──

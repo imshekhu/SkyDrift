@@ -747,6 +747,17 @@ export function createHudSystem(): GameSystem {
       hintsTimer = 0
       hintsFaded = false
 
+      // SKYDRIFT-MINIMAL: show ONLY speed + altitude. Reversible — delete this
+      // block to restore the full HUD (XP ring/level, boost meter, quest tracker,
+      // collectible chips, minimap, control hints). The update() paths for these
+      // stay (harmless — they just write to hidden, now-inert DOM).
+      wrap.style.display = 'none' // XP ring + level badge
+      bWrap.style.display = 'none' // boost meter
+      q.style.display = 'none' // quest tracker (place-name text)
+      tr.style.display = 'none' // collectible count chips
+      canvas.style.display = 'none' // minimap
+      hint.style.display = 'none' // control hints
+
       offCollect = ctx.events.on('collect', onCollect)
       offLevel = ctx.events.on('levelup', onLevelUp)
       offQStart = ctx.events.on('questStart', onQuestStart)

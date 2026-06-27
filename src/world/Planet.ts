@@ -59,6 +59,14 @@ const BIOME = {
   river: sc(0x3fb8f0), // inland freshwater — bright, saturated blue-cyan so waterways read clearly vs land
 }
 
+// ── SMOOTH-SPHERE MODE (SKYDRIFT-MINIMAL) ─────────────────────────────────────
+// true → no terrain displacement, no noise bumps, one solid colour, no water
+// shell. heightAt() returns 0 everywhere, so flight's terrain-relative altitude
+// collapses to a fixed, rock-steady cruise. Flip to false to restore the full
+// FBM/biome/river/water planet — every original line is intact, just guarded.
+const FLAT_PLANET = true
+const FLAT_COLOR = sc(0x6fae5f) // pleasant solid green
+
 // Elevation thresholds in NORMALIZED elevation space e∈[0,1] (0 = deepest, 1 = peak).
 // Land starts at SHORE; below that is ocean floor (hidden under the water sphere).
 const SHORE = 0.5
@@ -135,6 +143,7 @@ export function buildPlanet(radius: number, rand: () => number, regions?: Region
   // (River basins are a thin cosmetic dip handled in the mesh only — heightAt
   //  stays a pure function of elevationAt so gameplay placement is unchanged.)
   const heightAt = (dir: THREE.Vector3): number => {
+    if (FLAT_PLANET) return 0 // smooth sphere → fixed-altitude cruise
     const x = dir.x
     const y = dir.y
     const z = dir.z
@@ -196,30 +205,37 @@ export function buildPlanet(radius: number, rand: () => number, regions?: Region
     // hair below their surroundings (cosmetic only — heightAt() ignores this).
     let h = eWorld < SEA_LEVEL ? -WATER_INSET * radius : eWorld
     if (river > 0) h -= river * RELIEF * radius * 0.12
-    const r = radius + h
+    const r = radius + (FLAT_PLANET ? 0 : h) // FLAT → undisplaced unit sphere
     pos.setXYZ(i, dir.x * r, dir.y * r, dir.z * r)
 
     // Latitude (|y| of the unit dir) frosts the poles regardless of altitude.
     const lat = Math.abs(dir.y)
 
-    // Pick + blend biome by band for soft pastel transitions.
-    biomeColor(e, lat, river, col, tmp)
+    if (FLAT_PLANET) {
+      // SKYDRIFT-MINIMAL: one uniform colour → a clean solid sphere.
+      colors[i * 3] = FLAT_COLOR.r
+      colors[i * 3 + 1] = FLAT_COLOR.g
+      colors[i * 3 + 2] = FLAT_COLOR.b
+    } else {
+      // Pick + blend biome by band for soft pastel transitions.
+      biomeColor(e, lat, river, col, tmp)
 
-    // Region tint: push the surface colour toward this region's hue (feathered
-    // at borders) so each biome region reads as a distinct PLACE from the air.
-    if (regions) {
-      const inf = regionInfluenceAt(regions, dir.x, dir.y, dir.z)
-      const a = inf.amount
-      col.r = col.r * (1 - a) + inf.tintR * a
-      col.g = col.g * (1 - a) + inf.tintG * a
-      col.b = col.b * (1 - a) + inf.tintB * a
+      // Region tint: push the surface colour toward this region's hue (feathered
+      // at borders) so each biome region reads as a distinct PLACE from the air.
+      if (regions) {
+        const inf = regionInfluenceAt(regions, dir.x, dir.y, dir.z)
+        const a = inf.amount
+        col.r = col.r * (1 - a) + inf.tintR * a
+        col.g = col.g * (1 - a) + inf.tintG * a
+        col.b = col.b * (1 - a) + inf.tintB * a
+      }
+
+      // Subtle per-vertex value jitter for a hand-painted feel (deterministic).
+      const j = 1 + (hash01(i) - 0.5) * 0.06
+      colors[i * 3] = Math.min(1, col.r * j)
+      colors[i * 3 + 1] = Math.min(1, col.g * j)
+      colors[i * 3 + 2] = Math.min(1, col.b * j)
     }
-
-    // Subtle per-vertex value jitter for a hand-painted feel (deterministic).
-    const j = 1 + (hash01(i) - 0.5) * 0.06
-    colors[i * 3] = Math.min(1, col.r * j)
-    colors[i * 3 + 1] = Math.min(1, col.g * j)
-    colors[i * 3 + 2] = Math.min(1, col.b * j)
   }
 
   pos.needsUpdate = true
@@ -229,7 +245,7 @@ export function buildPlanet(radius: number, rand: () => number, regions?: Region
 
   const landMat = new THREE.MeshStandardMaterial({
     vertexColors: true,
-    flatShading: true,
+    flatShading: !FLAT_PLANET, // SKYDRIFT-MINIMAL: smooth-shade the flat sphere
     roughness: 1.0,
     metalness: 0.0,
   })
@@ -289,7 +305,7 @@ export function buildPlanet(radius: number, rand: () => number, regions?: Region
   const group = new THREE.Group()
   group.name = 'planet'
   group.add(landMesh)
-  group.add(waterMesh)
+  if (!FLAT_PLANET) group.add(waterMesh) // SKYDRIFT-MINIMAL: no water shell when flat
 
   const planet: Planet = {
     radius,

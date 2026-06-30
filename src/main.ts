@@ -50,7 +50,17 @@ import { createCannonSystem } from './systems/Cannon'
 import { createPlacementsSystem } from './systems/Placements'
 import { createCrustSystem } from './systems/Crust'
 import { createCosmosSystem } from './systems/Cosmos'
+import { createCelestialFXSystem } from './systems/CelestialFX'
+import { createAtmosphereSystem } from './systems/Atmosphere'
+import { createCloudsSystem } from './systems/Clouds'
+import { createDayNightSystem } from './systems/DayNight'
 import { createLandscapeSystem } from './systems/Landscape'
+import { createWaterFXSystem } from './systems/WaterFX'
+import { createTownLightsSystem } from './systems/TownLights'
+import { createFirefliesSystem } from './systems/Fireflies'
+import { createBeaconsSystem } from './systems/Beacons'
+import { createHarborsSystem } from './systems/Harbors'
+import { createWildlifeSystem } from './systems/Wildlife'
 import { createWingTrailsSystem } from './systems/WingTrails'
 import { createAudioSystem } from './systems/Audio'
 /* SKYDRIFT-MINIMAL: cut —
@@ -219,14 +229,24 @@ const game = new Game(ctx)
 // restore it. The full original registration is preserved at the end of the block.
 game.add(
   createLightingSystem(), // 3-light rig so the sphere + plane are lit
+  createDayNightSystem(), // drives the sun rig + sky/fog through a day↔night cycle
   createCosmosSystem(), // sky dome + stars + two moons + dwarf star + planets + satellites
+  createCelestialFXSystem(), // auroras, meteors, a comet, nebula glow
+  createAtmosphereSystem(), // fresnel airglow rim + horizon haze around the planet
   createCrustSystem(), // blue "crust" shell wrapping the planet surface
   createLandscapeSystem(), // green islands w/ sandy coasts + instanced forests (per Sites)
+  createWaterFXSystem(), // coastline foam, ocean sparkle, ripples
+  createCloudsSystem(), // low-poly clouds drifting below the plane
   createPlanetWaterSystem(planet), // animates the seas/lakes shell (subtle waves)
   createVehiclesSystem(), // parents the biplane mesh under ctx.player.obj (planeObj)
   createWingTrailsSystem(), // wingtip vapour trails while banking + W
   createCannonSystem(), // spacebar fires glowing bolts from the nose cannon
   createPlacementsSystem(), // designer-pinned structures + SITES settlements/landmarks
+  createHarborsSystem(), // docks, piers, warehouses, coastal lighthouses
+  createTownLightsSystem(), // glowing windows, street lamps, campfires (emissive bloom)
+  createBeaconsSystem(), // rotating coastal light beams + blinking buoys
+  createFirefliesSystem(), // firefly swarms + glow flora over forest/meadow isles
+  createWildlifeSystem(), // bird flocks, leaping fish, butterflies
   createHudSystem(), // altitude + speed readout (the rest is hidden in Hud.ts)
   audioSystem // engine bed; kept so audioBus stays live for the pause/start screens
 )

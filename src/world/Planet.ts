@@ -66,6 +66,16 @@ const BIOME = {
 // FBM/biome/river/water planet — every original line is intact, just guarded.
 const FLAT_PLANET = true
 const FLAT_COLOR = sc(0x6fae5f) // pleasant solid green
+// FLAT_WATER (only meaningful when FLAT_PLANET): carve shallow seas + lakes into
+// the smooth globe and fill them with the animated translucent water shell. Keeps
+// the clean low-poly look — basins are gentle, no mountainous terrain returns.
+const FLAT_WATER = false // ← OFF for now: a completely smooth green sphere (water WIP)
+// Recess the green "core" a few units below the base radius so the blue Crust
+// shell can sit at the EXACT surface radius (= where placed items sit) without
+// z-fighting the core beneath it. Purely visual — heightAt() still returns 0.
+export const FLAT_CORE_GAP = 6
+const FLAT_SEABED = sc(0xc9b886) // warm sandy seabed → turquoise shallows under blue water
+const FLAT_WATER_DEEP = sc(0x356bb0) // a deeper, richer blue for open-sea centres
 
 // Elevation thresholds in NORMALIZED elevation space e∈[0,1] (0 = deepest, 1 = peak).
 // Land starts at SHORE; below that is ocean floor (hidden under the water sphere).
@@ -81,6 +91,49 @@ export function buildPlanet(radius: number, rand: () => number, regions?: Region
   const noise3D = createNoise3D(alea(seed))
   // A second decorrelated field drives domain-warp + rivers (offset seed).
   const noiseWarp = createNoise3D(alea((seed ^ 0x9e3779b9) >>> 0))
+
+  // ── FLAT-WATER fields (smooth-globe seas + lakes) ──────────────────────────
+  // A slow large-scale field carves continental seas; a sparse high-freq field
+  // dots inland lakes onto the dry land. Pure functions of direction → the land
+  // carve, the seabed colour and the water shell colour all agree exactly.
+  const SEA_FREQ = 0.85
+  const seaFbm = (x: number, y: number, z: number): number => {
+    let amp = 1
+    let f = SEA_FREQ
+    let sum = 0
+    let norm = 0
+    for (let o = 0; o < 3; o++) {
+      sum += amp * noise3D(x * f + 100.0, y * f + 100.0, z * f + 100.0)
+      norm += amp
+      amp *= 0.5
+      f *= 2.0
+    }
+    return sum / norm // ∈ [-1,1]
+  }
+  const LAKE_FREQ = 3.2
+  const lakeFbm = (x: number, y: number, z: number): number =>
+    noise3D(x * LAKE_FREQ - 60.0, y * LAKE_FREQ + 24.0, z * LAKE_FREQ - 12.0)
+
+  const SEA_THRESHOLD = -0.08 // seaFbm below this → ocean (~40% of the globe)
+  const SEA_DEPTH_SPAN = 0.42 // how quickly the sea deepens past the shore
+  // Water depth ∈ [0,1]: 0 = dry land, 1 = deepest. Seas from the slow field +
+  // sparse lakes on land away from the coast.
+  const waterDepthFlat = (x: number, y: number, z: number): number => {
+    const s = seaFbm(x, y, z)
+    if (s < SEA_THRESHOLD) return clamp01((SEA_THRESHOLD - s) / SEA_DEPTH_SPAN)
+    // dry land: scatter the occasional lake, kept clear of the coastline.
+    if (s > SEA_THRESHOLD + 0.12) {
+      const lv = lakeFbm(x, y, z)
+      if (lv > 0.6) return clamp01((lv - 0.6) / 0.25) * 0.7
+    }
+    return 0
+  }
+
+  // The water shell floats a hair ABOVE the smooth green plain (and is built ONLY
+  // over water regions), so it can never z-fight or get "absorbed" into the land
+  // as the waves bob — the wave trough still clears the plain. No basins carved.
+  const FLAT_WATER_LIFT = radius * 0.004 // water surface sits this far ABOVE the plain
+  const FLAT_BEACH = 0.05 // water-depth span painted as sandy beach at the shore
 
   // FBM sampled on the UNIT sphere direction. Returns signed elevation in ~[-1,1]
   // before the RELIEF scale. Pulled out so heightAt() and the mesh agree exactly.
@@ -205,17 +258,33 @@ export function buildPlanet(radius: number, rand: () => number, regions?: Region
     // hair below their surroundings (cosmetic only — heightAt() ignores this).
     let h = eWorld < SEA_LEVEL ? -WATER_INSET * radius : eWorld
     if (river > 0) h -= river * RELIEF * radius * 0.12
-    const r = radius + (FLAT_PLANET ? 0 : h) // FLAT → undisplaced unit sphere
+    // FLAT_WATER keeps the globe perfectly smooth — NO basins carved. The water
+    // shell floats just above the plain (built only over water), so it never digs
+    // into or z-fights the land. flatWd only drives the beach/seabed COLOUR here.
+    const flatWd = FLAT_PLANET && FLAT_WATER ? waterDepthFlat(dir.x, dir.y, dir.z) : 0
+    const r = FLAT_PLANET ? radius - FLAT_CORE_GAP : radius + h
     pos.setXYZ(i, dir.x * r, dir.y * r, dir.z * r)
 
     // Latitude (|y| of the unit dir) frosts the poles regardless of altitude.
     const lat = Math.abs(dir.y)
 
     if (FLAT_PLANET) {
-      // SKYDRIFT-MINIMAL: one uniform colour → a clean solid sphere.
-      colors[i * 3] = FLAT_COLOR.r
-      colors[i * 3 + 1] = FLAT_COLOR.g
-      colors[i * 3 + 2] = FLAT_COLOR.b
+      // Smooth globe: solid green plain, with sandy beaches + a seabed gradient
+      // wherever FLAT_WATER carved a basin (the seabed shows through the water).
+      if (FLAT_WATER && flatWd > 0.001) {
+        if (flatWd <= FLAT_BEACH) {
+          col.copy(FLAT_COLOR).lerp(tmp.copy(BIOME.sand), smooth(flatWd / FLAT_BEACH))
+        } else {
+          const t = smooth(clamp01((flatWd - FLAT_BEACH) / (0.6 - FLAT_BEACH)))
+          col.copy(BIOME.sand).lerp(tmp.copy(FLAT_SEABED), t)
+        }
+      } else {
+        col.copy(FLAT_COLOR)
+      }
+      const j = 1 + (hash01(i) - 0.5) * 0.05
+      colors[i * 3] = Math.min(1, col.r * j)
+      colors[i * 3 + 1] = Math.min(1, col.g * j)
+      colors[i * 3 + 2] = Math.min(1, col.b * j)
     } else {
       // Pick + blend biome by band for soft pastel transitions.
       biomeColor(e, lat, river, col, tmp)
@@ -254,44 +323,88 @@ export function buildPlanet(radius: number, rand: () => number, regions?: Region
   landMesh.castShadow = false
   landMesh.receiveShadow = false
 
-  // ── Inner translucent water sphere (gentle bob animated by the water system) ─
-  // Low-detail icosa: cheap, and flat-shaded facets catch the light like calm
-  // pastel sea. Sits a hair below mean radius; land beaches rise above it.
-  // We tint vertices a touch lighter where the seabed rises toward shore so the
-  // ocean fades to a foamy turquoise at the coast instead of a hard blue ring.
-  const waterRadius = radius - WATER_INSET * radius
-  const waterGeo = new THREE.IcosahedronGeometry(waterRadius, 4)
-  const wPos = waterGeo.attributes.position as THREE.BufferAttribute
-  const wCount = wPos.count
-  const wColors = new Float32Array(wCount * 3)
+  // ── Translucent water shell (gentle bob animated by the water system) ───────
+  // FLAT_WATER: build the shell ONLY over water regions and float it a hair ABOVE
+  // the smooth plain, so it can NEVER z-fight the land or get "absorbed" into the
+  // sphere as the waves bob (the wave trough still clears the plain, and there's no
+  // water geometry over dry ground). Otherwise it's the classic just-below-sea-
+  // level shell the opaque land hides over dry ground.
+  const flatWater = FLAT_PLANET && FLAT_WATER
+  const waterRadius = flatWater ? radius + FLAT_WATER_LIFT : radius - WATER_INSET * radius
+  const srcWaterGeo = new THREE.IcosahedronGeometry(waterRadius, flatWater ? 5 : 4)
   const wDir = new THREE.Vector3()
   const wCol = new THREE.Color()
   const wTmp = new THREE.Color()
-  for (let i = 0; i < wCount; i++) {
-    wDir.set(wPos.getX(i), wPos.getY(i), wPos.getZ(i)).normalize()
-    const e = elevationAt(wDir.x, wDir.y, wDir.z)
-    // Depth proxy: how far the seabed sits below sea level (0 = at coast).
-    const depth = clamp01(-e / (RELIEF * radius * 0.5))
-    // Lerp deep blue → shallow → pale foamy shoal as we approach the shore.
-    if (depth > 0.45) {
-      wCol.copy(BIOME.waterDeep).lerp(wTmp.copy(BIOME.waterShallow), clamp01((1 - depth) / 0.55))
-    } else {
-      const t = clamp01((0.45 - depth) / 0.45)
-      wCol.copy(BIOME.waterShallow).lerp(wTmp.copy(BIOME.shoal), t)
-    }
-    wColors[i * 3] = wCol.r
-    wColors[i * 3 + 1] = wCol.g
-    wColors[i * 3 + 2] = wCol.b
+  const colorWaterVert = (x: number, y: number, z: number): void => {
+    wDir.set(x, y, z).normalize()
+    const wd = waterDepthFlat(wDir.x, wDir.y, wDir.z)
+    // Pale shoal at the very rim, then quickly into shallow → deep blue.
+    if (wd < 0.12) wCol.copy(BIOME.shoal).lerp(wTmp.copy(BIOME.waterShallow), clamp01(wd / 0.12))
+    else wCol.copy(BIOME.waterShallow).lerp(wTmp.copy(FLAT_WATER_DEEP), clamp01((wd - 0.12) / 0.5))
   }
-  waterGeo.setAttribute('color', new THREE.BufferAttribute(wColors, 3))
-  // Cache base positions so the bob is a pure function of base (no drift).
-  const waterBase = new Float32Array(wPos.array.length)
-  waterBase.set(wPos.array as Float32Array)
+
+  let waterGeo: THREE.BufferGeometry
+  if (flatWater) {
+    // Keep only the triangles whose centre lies over water → the shell exists
+    // solely above the seas/lakes, never over (or inside) the green land.
+    const sp = srcWaterGeo.attributes.position as THREE.BufferAttribute
+    const triCount = (sp.count / 3) | 0
+    const keepPos: number[] = []
+    const keepCol: number[] = []
+    const cdir = new THREE.Vector3()
+    for (let t = 0; t < triCount; t++) {
+      const a = t * 3
+      const b = t * 3 + 1
+      const c = t * 3 + 2
+      cdir
+        .set(
+          sp.getX(a) + sp.getX(b) + sp.getX(c),
+          sp.getY(a) + sp.getY(b) + sp.getY(c),
+          sp.getZ(a) + sp.getZ(b) + sp.getZ(c)
+        )
+        .normalize()
+      if (waterDepthFlat(cdir.x, cdir.y, cdir.z) <= 0.02) continue // dry → drop the tri
+      for (const ii of [a, b, c]) {
+        const x = sp.getX(ii)
+        const y = sp.getY(ii)
+        const z = sp.getZ(ii)
+        keepPos.push(x, y, z)
+        colorWaterVert(x, y, z)
+        keepCol.push(wCol.r, wCol.g, wCol.b)
+      }
+    }
+    waterGeo = new THREE.BufferGeometry()
+    waterGeo.setAttribute('position', new THREE.Float32BufferAttribute(keepPos, 3))
+    waterGeo.setAttribute('color', new THREE.Float32BufferAttribute(keepCol, 3))
+    waterGeo.computeVertexNormals()
+    srcWaterGeo.dispose()
+  } else {
+    waterGeo = srcWaterGeo
+    const wPos = waterGeo.attributes.position as THREE.BufferAttribute
+    const wCount = wPos.count
+    const wColors = new Float32Array(wCount * 3)
+    for (let i = 0; i < wCount; i++) {
+      wDir.set(wPos.getX(i), wPos.getY(i), wPos.getZ(i)).normalize()
+      const e = elevationAt(wDir.x, wDir.y, wDir.z)
+      const depth = clamp01(-e / (RELIEF * radius * 0.5))
+      if (depth > 0.45) {
+        wCol.copy(BIOME.waterDeep).lerp(wTmp.copy(BIOME.waterShallow), clamp01((1 - depth) / 0.55))
+      } else {
+        const t = clamp01((0.45 - depth) / 0.45)
+        wCol.copy(BIOME.waterShallow).lerp(wTmp.copy(BIOME.shoal), t)
+      }
+      wColors[i * 3] = wCol.r
+      wColors[i * 3 + 1] = wCol.g
+      wColors[i * 3 + 2] = wCol.b
+    }
+    waterGeo.setAttribute('color', new THREE.BufferAttribute(wColors, 3))
+  }
+
   const waterMat = new THREE.MeshStandardMaterial({
     vertexColors: true,
     transparent: true,
-    opacity: 0.8,
-    roughness: 0.28,
+    opacity: 0.86,
+    roughness: 0.4, // diffuse blue dominates; still a soft glint off the wave facets
     metalness: 0.0,
     flatShading: true,
     envMapIntensity: 0.6,
@@ -305,7 +418,7 @@ export function buildPlanet(radius: number, rand: () => number, regions?: Region
   const group = new THREE.Group()
   group.name = 'planet'
   group.add(landMesh)
-  if (!FLAT_PLANET) group.add(waterMesh) // SKYDRIFT-MINIMAL: no water shell when flat
+  if (!FLAT_PLANET || FLAT_WATER) group.add(waterMesh) // seas/lakes shell
 
   const planet: Planet = {
     radius,
@@ -411,11 +524,13 @@ export function createPlanetWaterSystem(planet: Planet): GameSystem {
   let attr: THREE.BufferAttribute | null = null
   let baseRadius = planet.radius
 
-  // Bob tuning — small amplitude so it reads as a calm, breathing sea.
-  const AMP = planet.radius * 0.0017
-  const SHIMMER = planet.radius * 0.0006 // tiny fast ripple layered on the swell
-  const SPATIAL = 7.0 // wave count around the sphere
-  const TIME_FREQ = 0.6 // wave speed
+  // Bob tuning — small swell so flat-shaded facets tilt (the glint dances as they
+  // move; flatShading derives the normals, so no recompute needed). Kept well
+  // under FLAT_WATER_LIFT so the wave trough always clears the plain → no z-fight.
+  const AMP = planet.radius * 0.0014
+  const SHIMMER = planet.radius * 0.0005 // faster ripple layered on the swell
+  const SPATIAL = 11.0 // wave count around the sphere — choppier → livelier glint
+  const TIME_FREQ = 0.9 // wave speed
   const UPDATE_HZ = 30 // throttle vertex writes (plenty smooth, kinder to mobile)
   let accum = 0
 
@@ -430,7 +545,9 @@ export function createPlanetWaterSystem(planet: Planet): GameSystem {
       const src = attr.array as Float32Array
       basePos = new Float32Array(src.length)
       basePos.set(src)
-      baseRadius = planet.radius - WATER_INSET * planet.radius
+      // Derive the shell radius from its own geometry so this works for the
+      // classic sea-level shell AND the FLAT_WATER (just-below-plain) shell.
+      baseRadius = Math.hypot(src[0], src[1], src[2]) || planet.radius
     },
     update(dt: number, ctx: GameContext): void {
       if (!water || !basePos || !attr) return
@@ -464,7 +581,9 @@ export function createPlanetWaterSystem(planet: Planet): GameSystem {
         arr[i + 2] = uz * r
       }
       attr.needsUpdate = true
-      // Normals left as-is: amplitude is tiny and recomputing per-frame is costly.
+      // No normal recompute: the material is flatShading, so face normals are
+      // derived in-shader from the (now-moved) positions → the glint already
+      // shimmers as the facets tilt, for free.
     },
     dispose(): void {
       water = null

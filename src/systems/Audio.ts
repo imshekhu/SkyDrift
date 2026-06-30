@@ -32,7 +32,10 @@ import { TUNING } from '../plane/flight'
  */
 
 // ---- cozy tuning (module-local; never exported, keeps the contract clean) ----
-const MASTER_GAIN = 0.82
+// MUTED → master gain forced to 0 so the whole game runs silent. Flip to false
+// to restore sound. (Set per request: "start server but without sound".)
+const MUTED = true
+const MASTER_GAIN = MUTED ? 0.0 : 0.82
 const MUSIC_GAIN = 0.1 // a whisper-quiet pad, never competes with SFX
 const MELODY_GAIN = 0.06 // softer still — a few wandering notes, not a tune
 const WIND_GAIN_MAX = 0.17

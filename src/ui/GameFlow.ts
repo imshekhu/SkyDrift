@@ -19,6 +19,8 @@ export interface GameFlow {
   isPlaying(): boolean
   isMenu(): boolean
   isPaused(): boolean
+  /** hide/show the whole menu·pause·pause-button chrome (the editor hides it) */
+  setChromeVisible(v: boolean): void
 }
 
 export interface GameFlowOpts {
@@ -162,5 +164,10 @@ export function createGameFlow(opts: GameFlowOpts): GameFlow {
     isPlaying: () => state === 'playing',
     isMenu: () => state === 'menu',
     isPaused: () => state === 'paused',
+    setChromeVisible: (v: boolean) => {
+      root.style.display = v ? '' : 'none'
+      if (v) apply() // restore HUD visibility for the current state
+      else hudRoot.style.visibility = 'hidden'
+    },
   }
 }

@@ -21,14 +21,16 @@ export const TUNING = {
   SPEED_LERP: 3,
   // Physical ground speed = this × the displayed speed. < 1 slows the plane down
   // WITHOUT changing the SPD readout (the HUD reads `speed`; only motion is scaled).
-  MOVE_SPEED_SCALE: 0.5,
+  // 2× the previous pace (~35s/lap now). Physical ground speed only — the SPD
+  // readout is unchanged. (Lap time is set by this ratio, not by PLANET_RADIUS.)
+  MOVE_SPEED_SCALE: 0.4148,
 
   PITCH_RATE: 1.6,
   YAW_RATE: 0.9,
-  ROLL_RATE: 2.8,
+  ROLL_RATE: 4.6, // quicker, easier banking into turns (was 2.8)
   INPUT_SMOOTH: 8.0,
 
-  BANK_TO_YAW: 0.69, // banking carves the turn (60% of the old 1.15 — gentler steering)
+  BANK_TO_YAW: 0.483, // 70% of 0.69 — reduced another 30% for gentler turns
   AUTO_LEVEL: 0.8, // recenter wings when roll released
 
   MIN_ALTITUDE: 6 * S,
@@ -41,17 +43,18 @@ export const TUNING = {
   // (10/30 are authored radius-100 units; × WORLD_SCALE → terrain+64 → terrain+192 here.)
   CRUISE_CLEARANCE: 10 * S, // baseline cruise altitude (= 64 ALT on the current scale)
   CLIMB_CLEARANCE: 100, // Arrow-Up ceiling: hold Up to rise to 100 ALT
+  DESCEND_CLEARANCE: 30, // S / Arrow-Down floor: hold Down to dive to 30 ALT
   CLIMB_RISE_K: 1.2, // how briskly Arrow-Up climbs toward the ceiling
-  CLIMB_DESCEND_K: 1.5, // how briskly S / Arrow-Down dumps the climbed altitude
-  CLIMB_GLIDE_TIME: 10, // seconds to smoothly glide back to cruise after releasing Up
+  CLIMB_DESCEND_K: 1.2, // how briskly S / Arrow-Down dives toward the floor
+  CLIMB_GLIDE_TIME: 10, // seconds to smoothly glide back to cruise after release
   FLOOR_CLEARANCE: 3 * S, // HARD floor = local terrain height + this (no clipping mountains)
   CEILING_ALTITUDE: 46 * S, // HARD ceiling above base radius (can't escape to space)
   GRAVITY: 9, // (legacy/unused — altitude uses the ALT_RETURN spring)
   LIFT_AT_CRUISE: 9,
-  ALIGN_RATE: 2.6, // glue to sphere — hug the curvature so it doesn't fly off tangentially
+  ALIGN_RATE: 4.5, // glue to sphere — eased from 7.0 so held banks aren't yanked flat (still straighter than the old 2.6)
   ROLL_DURATION: 0.55,
 
-  CAM_DISTANCE: 14 * S,
+  CAM_DISTANCE: 18.2 * S, // 30% farther back from the plane (was 14)
   CAM_HEIGHT: 5 * S,
   CAM_POS_LAG: 6.0,
   CAM_ROT_LAG: 9.0,
@@ -161,7 +164,7 @@ export class Flight {
     // Banking CARVES the turn: a bank auto-induces yaw (no manual rudder anymore).
     const inducedYaw = -bank * TUNING.BANK_TO_YAW
 
-    const dPitch = this.sc * TUNING.PITCH_RATE * dt // nose pitches up while climbing
+    const dPitch = -this.sc * TUNING.PITCH_RATE * dt // negative X rot = nose UP in Three.js
     const dRoll = this.sr * TUNING.ROLL_RATE * dt // A/D bank
     const dYaw = inducedYaw * dt // bank-induced only
 
@@ -232,25 +235,25 @@ export class Flight {
     // smoothstep ease (lingers high, then settles soft).
     const prevOffset = this.climbOffset
     const climbMax = TUNING.CLIMB_CLEARANCE - TUNING.CRUISE_CLEARANCE
+    const descendMin = TUNING.DESCEND_CLEARANCE - TUNING.CRUISE_CLEARANCE // negative
     const climbing = input.climb > 0.5 // Arrow Up
     const descending = input.climb < -0.5 || input.throttle < -0.5 // Arrow Down or S
     if (climbing) {
       this.gliding = false
       this.climbOffset += (climbMax - this.climbOffset) * damp(TUNING.CLIMB_RISE_K, dt)
-    } else if (descending && this.climbOffset > 1e-3) {
-      // brisk, deliberate descent back to cruise — never below it (only the gain).
+    } else if (descending) {
+      // hold Down/S to actively DIVE below cruise toward the dive floor.
       this.gliding = false
-      this.climbOffset += (0 - this.climbOffset) * damp(TUNING.CLIMB_DESCEND_K, dt)
-      if (this.climbOffset < 1e-3) this.climbOffset = 0
-    } else if (this.gliding || this.climbOffset > 1e-3) {
-      // released → slow ~10s smoothstep glide back to cruise (slow-in / slow-out).
+      this.climbOffset += (descendMin - this.climbOffset) * damp(TUNING.CLIMB_DESCEND_K, dt)
+    } else if (this.gliding || Math.abs(this.climbOffset) > 1e-3) {
+      // released → linear 10s glide back toward cruise (from above OR below).
       if (!this.gliding) {
         this.gliding = true
         this.glideFrom = this.climbOffset
         this.glideT = 0
       }
       this.glideT = Math.min(1, this.glideT + dt / TUNING.CLIMB_GLIDE_TIME)
-      this.climbOffset = this.glideFrom * (1 - ease(this.glideT))
+      this.climbOffset = this.glideFrom * (1 - this.glideT)
       if (this.glideT >= 1) {
         this.climbOffset = 0
         this.gliding = false

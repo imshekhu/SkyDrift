@@ -79,6 +79,9 @@ export function createVehiclesSystem(): GameSystem {
   let propBlades: THREE.Object3D | null = null // crisp blade cross
   let propBlur: THREE.Mesh | null = null // translucent motion-blur disc
   let propBlurMat: THREE.MeshLambertMaterial | null = null
+  let gatlingCluster: THREE.Object3D | null = null // 6-barrel cluster, spins on fire
+  let gatlingSpin = 0 // accumulated rotation angle (rad)
+  let gatlingSpool = 0 // 0..1 smoothed firing level (drives spin rate)
   let carpetCloth: THREE.Mesh | null = null
   let carpetClothBase: Float32Array | null = null // rest positions (x,z); y is waved
   let carpetTrim: THREE.Object3D | null = null // border frame; rides the cloth tilt
@@ -148,6 +151,43 @@ export function createVehiclesSystem(): GameSystem {
     cockpit.scale.set(1, 0.8, 1.2)
     cockpit.position.set(0, 0.42, -0.1)
     g.add(cockpit)
+
+    // Gatling cannon — underslung minigun beneath the fuselage. Pylon → housing
+    // → spinning multi-barrel cluster. Cluster is captured for per-frame spin.
+    const pylonGeo = new THREE.BoxGeometry(0.1, 0.22, 0.16)
+    geometries.push(pylonGeo)
+    const pylon = new THREE.Mesh(pylonGeo, wireMat)
+    pylon.position.set(0, -0.44, 0.5)
+    g.add(pylon)
+    const housingGeo = new THREE.CylinderGeometry(0.14, 0.14, 0.42, 10)
+    housingGeo.rotateX(Math.PI / 2)
+    geometries.push(housingGeo)
+    const housing = new THREE.Mesh(housingGeo, hubMat)
+    housing.position.set(0, -0.55, 0.5)
+    g.add(housing)
+    // Rotating barrel cluster: 6 mini barrels arranged in a ring around +Z.
+    const cluster = new THREE.Group()
+    cluster.position.set(0, -0.55, 0.95)
+    g.add(cluster)
+    gatlingCluster = cluster
+    const miniBarrelGeo = new THREE.CylinderGeometry(0.028, 0.033, 0.7, 6)
+    miniBarrelGeo.rotateX(Math.PI / 2)
+    geometries.push(miniBarrelGeo)
+    const NB = 6
+    const ringR = 0.085
+    for (let i = 0; i < NB; i++) {
+      const a = (i / NB) * Math.PI * 2
+      const mb = new THREE.Mesh(miniBarrelGeo, hubMat)
+      mb.position.set(Math.cos(a) * ringR, Math.sin(a) * ringR, 0)
+      cluster.add(mb)
+    }
+    // Front face plate that holds the barrels (cosmetic disc).
+    const facePlateGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.04, 10)
+    facePlateGeo.rotateX(Math.PI / 2)
+    geometries.push(facePlateGeo)
+    const facePlate = new THREE.Mesh(facePlateGeo, body)
+    facePlate.position.z = 0.35
+    cluster.add(facePlate)
 
     // Double wings (the biplane silhouette): a lower and an upper plank.
     const lowerWing = mesh(new THREE.BoxGeometry(5.0, 0.14, 1.05), wingMat)
@@ -596,7 +636,7 @@ export function createVehiclesSystem(): GameSystem {
       // scale a parent HOLDER (× WORLD_SCALE) rather than fight that animation.
       const rigHolder = new THREE.Group()
       rigHolder.name = 'rig-holder'
-      rigHolder.scale.setScalar(WORLD_SCALE)
+      rigHolder.scale.setScalar(WORLD_SCALE * 0.9) // plane at 90% of its authored size
       ctx.player.obj.add(rigHolder)
       rigHolder.add(biplane)
       rigHolder.add(carpet)
@@ -651,6 +691,15 @@ export function createVehiclesSystem(): GameSystem {
       }
 
       const activeId = rigs[activeIndex]?.id
+
+      // Spin the gatling cluster: spools up when firing, idle drift when not.
+      if (activeId === 'biplane' && gatlingCluster) {
+        const target = ctx.input.firing ? 1 : 0
+        gatlingSpool += (target - gatlingSpool) * damp(7, dt)
+        gatlingSpin += (2 + 28 * gatlingSpool) * dt
+        if (gatlingSpin > Math.PI * 2) gatlingSpin -= Math.PI * 2
+        gatlingCluster.rotation.z = gatlingSpin
+      }
 
       // Spin the biplane propeller + ramp the motion-blur disc with rpm.
       if (activeId === 'biplane' && propBlades) {
@@ -724,6 +773,7 @@ export function createVehiclesSystem(): GameSystem {
       propBlades = null
       propBlur = null
       propBlurMat = null
+      gatlingCluster = null
       carpetCloth = null
       carpetClothBase = null
       carpetTrim = null

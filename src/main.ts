@@ -10,10 +10,11 @@ import { Game } from './core/Game'
 import { createEventBus } from './core/EventBus'
 import { createHudBus } from './core/HudBus'
 
-import { buildPlanet } from './world/Planet' // SKYDRIFT-MINIMAL: createPlanetWaterSystem cut
+import { buildPlanet, createPlanetWaterSystem } from './world/Planet'
 import { assignRegions } from './world/regions'
 import { createComposer } from './post/Composer'
 import { createGameFlow } from './ui/GameFlow'
+import { createEditor } from './ui/Editor'
 
 // --- Systems (registration order matters — see the game.add() block below) ---
 // SKYDRIFT-MINIMAL: stripped to plane + smooth sphere + alt/speed HUD. Every
@@ -45,6 +46,12 @@ import { createRaceSystem } from './systems/QuestRace'
 import { createPortalsSystem } from './systems/WorldsPortals'
 */
 import { createHudSystem } from './systems/Hud'
+import { createCannonSystem } from './systems/Cannon'
+import { createPlacementsSystem } from './systems/Placements'
+import { createCrustSystem } from './systems/Crust'
+import { createCosmosSystem } from './systems/Cosmos'
+import { createLandscapeSystem } from './systems/Landscape'
+import { createWingTrailsSystem } from './systems/WingTrails'
 import { createAudioSystem } from './systems/Audio'
 /* SKYDRIFT-MINIMAL: cut —
 import { createMultiplayerSystem } from './systems/Multiplayer'
@@ -212,7 +219,14 @@ const game = new Game(ctx)
 // restore it. The full original registration is preserved at the end of the block.
 game.add(
   createLightingSystem(), // 3-light rig so the sphere + plane are lit
+  createCosmosSystem(), // sky dome + stars + two moons + dwarf star + planets + satellites
+  createCrustSystem(), // blue "crust" shell wrapping the planet surface
+  createLandscapeSystem(), // green islands w/ sandy coasts + instanced forests (per Sites)
+  createPlanetWaterSystem(planet), // animates the seas/lakes shell (subtle waves)
   createVehiclesSystem(), // parents the biplane mesh under ctx.player.obj (planeObj)
+  createWingTrailsSystem(), // wingtip vapour trails while banking + W
+  createCannonSystem(), // spacebar fires glowing bolts from the nose cannon
+  createPlacementsSystem(), // designer-pinned structures + SITES settlements/landmarks
   createHudSystem(), // altitude + speed readout (the rest is hidden in Hud.ts)
   audioSystem // engine bed; kept so audioBus stays live for the pause/start screens
 )
@@ -305,6 +319,10 @@ const flow = createGameFlow({
   },
 })
 
+// Designer editor — orbit/zoom the world + drop labelled pins (📍 button / E key).
+// When active it freezes the sim and renders its own orbit camera (see the loop).
+const editor = createEditor({ scene, camera, renderer, planet, flow, hudRoot: hud.root })
+
 // Slow cinematic orbit around the parked plane for the title screen.
 let _menuAngle = 0
 const _mUp = new THREE.Vector3()
@@ -339,6 +357,13 @@ function menuOrbit(dt: number) {
 const clock = new THREE.Clock()
 function loop() {
   const dt = Math.min(clock.getDelta(), 1 / 30) // clamp: no huge sim jumps after tab throttle/background
+
+  // Designer editor takes over: freeze the sim, render the free orbit view.
+  if (editor.isActive()) {
+    editor.update(dt)
+    composer.render()
+    return
+  }
 
   if (flow.isPlaying()) {
     pollKeyboard()

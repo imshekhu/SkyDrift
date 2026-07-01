@@ -125,22 +125,22 @@ export function createAtmosphereSystem(): GameSystem {
       const r = ctx.planet.radius // 640
 
       // HDR colours (channels >1 → bloom). Soft blue inner, brighter cyan rim.
-      const glowInner = new THREE.Color(0.18, 0.42, 0.95) // deep sky blue, dim
-      const glowRim = new THREE.Color(0.55, 1.45, 2.05) // luminous cyan limb
-      const hazeInner = new THREE.Color(0.12, 0.30, 0.66) // fainter blue
-      const hazeRim = new THREE.Color(0.32, 0.78, 1.25) // soft cyan, gentler
+      const glowInner = new THREE.Color(0.1, 0.24, 0.55) // deep sky blue, dim
+      const glowRim = new THREE.Color(0.28, 0.72, 1.05) // soft cyan limb
+      const hazeInner = new THREE.Color(0.06, 0.16, 0.36) // fainter blue
+      const hazeRim = new THREE.Color(0.16, 0.42, 0.72) // soft cyan, gentler
 
-      // ── 1) AIRGLOW SHELL — tight, brightest rim, ≈680 ──────────────────────
-      glowBaseI = 1.0
-      const glow = makeShell(r * 1.06, 5, glowInner, glowRim, 2.6, glowBaseI)
+      // ── 1) AIRGLOW SHELL — a THIN rim hugging the planet limb, ≈653 ────────
+      glowBaseI = 0.7
+      const glow = makeShell(r * 1.02, 5, glowInner, glowRim, 5.0, glowBaseI)
       glow.mesh.name = 'atmosphere.airglow'
       glow.mesh.renderOrder = 5 // after the opaque surface, before HUD sprites
       glowUniforms = glow.uniforms
       root.add(glow.mesh)
 
-      // ── 2) HAZE SHELL — wider, fainter, broader falloff, ≈700 ──────────────
-      hazeBaseI = 0.55
-      const haze = makeShell(r * 1.094, 5, hazeInner, hazeRim, 1.7, hazeBaseI)
+      // ── 2) HAZE SHELL — a fainter, slightly wider rim just outside it, ≈666 ─
+      hazeBaseI = 0.36
+      const haze = makeShell(r * 1.04, 5, hazeInner, hazeRim, 3.4, hazeBaseI)
       haze.mesh.name = 'atmosphere.haze'
       haze.mesh.renderOrder = 4
       hazeUniforms = haze.uniforms

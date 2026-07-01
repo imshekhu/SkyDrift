@@ -56,13 +56,13 @@ const _tmp = new THREE.Vector3()
 // triangles so we *could* flap them, but for an InstancedMesh we instead encode
 // flap as a tiny non-uniform Y-scale of the whole bird (cheap + reads as a beat).
 function makeBirdGeometry(): THREE.BufferGeometry {
-  const span = 2.2 * S
-  const chord = 1.5 * S
-  const sweep = 0.5 * S // wing-tips swept back
+  const span = 0.42 * S // small bird (~5u wingspan), not a giant chevron
+  const chord = 0.3 * S
+  const sweep = 0.1 * S // wing-tips swept back
   // 4 triangles (top+bottom of each wing) so it's visible from above & below.
   const v: number[] = []
   // wing tips slightly raised (a shallow dihedral) for a gull silhouette
-  const tipY = 0.32 * S
+  const tipY = 0.07 * S
   // left wing (−X), right wing (+X); nose at +Z, tail joint at −Z
   const nose: [number, number, number] = [0, 0, chord]
   const tail: [number, number, number] = [0, 0, -sweep]
